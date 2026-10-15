@@ -1,0 +1,7 @@
+# Thu muc build cua .NET
+bin/
+obj/
+
+# File cau hinh ca nhan cua Visual Studio
+.vs/
+*.user

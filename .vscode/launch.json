@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Server",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/Server/bin/Debug/net8.0-windows/LanMonitor.Server.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Server",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Client",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/Client/bin/Debug/net8.0-windows/LanMonitor.Client.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Client",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Server + Client (chay ca hai)",
+      "configurations": ["Server", "Client"],
+      "stopAll": true
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  // Solution nam trong thu muc src/ chu khong o goc, can chi ro cho C# Dev Kit
+  "dotnet.defaultSolution": "src/LanMonitor.sln",
+
+  // Khong hien thu muc build trong cay file
+  "files.exclude": {
+    "**/bin": true,
+    "**/obj": true
+  }
+}
