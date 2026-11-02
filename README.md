@@ -11,7 +11,7 @@
 | Thành phần | Yêu cầu | Kiểm tra |
 |---|---|---|
 | Hệ điều hành | Windows 10 hoặc 11, 64-bit | `winver` |
-| Python | 3.11 hoặc 3.12 (nhớ tick "Add Python to PATH" khi cài) | `python --version` |
+| Python | 3.11 hoặc 3.12 khuyến nghị; môi trường phát triển hiện tại dùng 3.14.7 | `python --version` |
 | Npcap | Bản mới nhất từ https://npcap.com | `sc query npcap` phải ra `STATE: 4 RUNNING` |
 | Git | Bản mới nhất | `git --version` |
 | Mạng | Wi-Fi hoặc Ethernet thật, **không bật client isolation** | Ping được điện thoại cùng mạng |
@@ -65,7 +65,7 @@ pytest
 | Thư viện | Vai trò |
 |---|---|
 | scapy | ARP scan, dựng và đọc gói tin (dùng Npcap bên dưới) |
-| icmplib | Ping và traceroute bằng ICMP |
+| icmplib | Ping ICMP và traceroute dự phòng trên nền tảng khác Windows |
 | PySide6 | Giao diện desktop (Qt) |
 | pyqtgraph | Biểu đồ độ trễ và mất gói theo thời gian |
 | reportlab | Xuất báo cáo PDF |
@@ -101,17 +101,31 @@ python -c "from icmplib import ping; r=ping('1.1.1.1', count=4); print(r.avg_rtt
 
 ## 5. Chạy ứng dụng
 
-> Phần này dùng được sau khi có `main.py`.
-
-1. Mở PowerShell hoặc VS Code **bằng quyền Administrator** (chuột phải, Run as administrator).
-2. Kích hoạt venv rồi chạy:
+Mở PowerShell bằng quyền Administrator cho các chế độ gửi/nhận gói mạng thô. Kích hoạt venv:
 
 ```powershell
 .venv\Scripts\Activate.ps1
-python main.py
 ```
 
-3. Lần đầu chạy: chọn đúng card mạng (Wi-Fi hoặc Ethernet), quét, rồi bấm **Tin cậy** cho các thiết bị của mình. Từ đó thiết bị nào mới xuất hiện sẽ bị cảnh báo.
+Các chế độ CLI hiện có:
+
+~~~powershell
+python main.py --cli scan
+python main.py --cli monitor
+python main.py --cli baseline
+python main.py --cli trace 1.1.1.1
+python main.py --cli diagnose
+~~~
+
+monitor chạy liên tục đến Ctrl+C. Lần đầu, để chương trình nhận diện thiết bị hiện có,
+sau đó mở terminal thứ hai và chạy `python main.py --cli baseline`. Sau khi chốt baseline,
+thiết bị mới chưa tin cậy sẽ bị cảnh báo.
+
+Giao diện dùng `python main.py` hoặc `python main.py --fake`. Cả hai chế độ cần
+`ui/main_window.py` của B; file này chưa có trong repo hiện tại. `--fake` không gửi gói mạng.
+
+Windows `tracert.exe` gửi ba probe cho mỗi TTL; thời gian chờ có thể dài khi nhiều hop không
+trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu traceroute.
 
 **Chạy test:**
 
