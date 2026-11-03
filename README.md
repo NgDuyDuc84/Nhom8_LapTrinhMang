@@ -173,3 +173,71 @@ pytest
 - Chỉ quét mạng của mình hoặc mạng được cho phép.
 - Chương trình chỉ **cảnh báo**, không chặn hay đuổi thiết bị.
 - Thử ARP spoofing hoặc trùng IP chỉ làm trong máy ảo của nhóm.
+
+
+## Hướng dẫn chạy các chức năng và kiểm thử NetGuard
+
+### 1. Cài đặt pytest
+
+Mở Terminal tại thư mục gốc dự án:
+
+```powershell
+python -m pip install pytest
+```
+
+### 2. Kiểm thử chẩn đoán mạng (C4)
+
+```powershell
+python -m pytest tests/test_diagnosis.py -v
+```
+
+Kết quả mong đợi: 12 test PASS.
+
+### 3. Kiểm thử mô phỏng mạng (C7)
+
+```powershell
+python -m pytest tests/test_simulate_network.py -v
+```
+
+Kết quả mong đợi: 4 test PASS.
+
+### 4. Kiểm thử cảnh báo Zalo (C8)
+
+```powershell
+python -m pytest tests/test_zalo_notify.py -v
+```
+
+Kết quả mong đợi: 4 test PASS.
+
+### 5. Chạy toàn bộ 20 bài kiểm thử
+
+```powershell
+python -m pytest tests/test_diagnosis.py tests/test_simulate_network.py tests/test_zalo_notify.py -v
+```
+
+Kết quả đã kiểm tra: 20/20 test PASS.
+
+### 6. Quét Wi-Fi và đề xuất kênh (C6)
+
+```powershell
+python -m extras.wifi_channels
+```
+
+Chức năng quét Wi-Fi hiện hỗ trợ Windows.
+
+### 7. Mô phỏng tình huống mạng (C7)
+
+```powershell
+python tests/simulate/simulate_network.py
+```
+
+Mô phỏng trùng IP, thiết bị mới và thiết bị mất kết nối.
+
+### 8. Demo cảnh báo Zalo (C8)
+
+```powershell
+python -m extras.zalo_notify
+```
+
+Lưu ý: Đây là chế độ mô phỏng, chưa gửi tin nhắn Zalo thật.
+
