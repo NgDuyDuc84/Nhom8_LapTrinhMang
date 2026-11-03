@@ -36,13 +36,13 @@ Cần cài thêm để test (không bắt buộc để chạy):
 Mở **PowerShell**, chạy từng lệnh:
 
 ```powershell
-git clone <địa-chỉ-repo>
-cd <thư-mục-repo>
+git clone https://github.com/NgDuyDuc84/Nhom8_LapTrinhMang.git
+cd Nhom8_LapTrinhMang
 
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 Nếu PowerShell báo lỗi "running scripts is disabled", chạy lệnh này rồi kích hoạt lại venv:
@@ -121,8 +121,25 @@ monitor chạy liên tục đến Ctrl+C. Lần đầu, để chương trình nh
 sau đó mở terminal thứ hai và chạy `python main.py --cli baseline`. Sau khi chốt baseline,
 thiết bị mới chưa tin cậy sẽ bị cảnh báo.
 
-Giao diện dùng `python main.py` hoặc `python main.py --fake`. Cả hai chế độ cần
-`ui/main_window.py` của B; file này chưa có trong repo hiện tại. `--fake` không gửi gói mạng.
+### Chạy thử giao diện với dữ liệu giả
+
+Sau khi cài dependencies và kích hoạt `.venv`, chạy:
+
+```powershell
+python main.py --fake
+```
+
+Chế độ này mở GUI với dữ liệu mô phỏng, không quét mạng và không cần quyền Administrator.
+Đóng cửa sổ sẽ thu nhỏ ứng dụng xuống khay hệ thống; chọn **Thoát** trong menu biểu tượng
+NetGuard để tắt hoàn toàn.
+
+Để mở ứng dụng với dữ liệu mạng thật, mở PowerShell bằng quyền Administrator rồi chạy:
+
+```powershell
+python main.py
+```
+
+Chế độ thật cần Npcap đang chạy và quyền Administrator.
 
 Windows `tracert.exe` gửi ba probe cho mỗi TTL; thời gian chờ có thể dài khi nhiều hop không
 trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu traceroute.
@@ -130,7 +147,7 @@ trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu tracerout
 **Chạy test:**
 
 ```powershell
-pytest
+python -m pytest -q
 ```
 
 ## 6. Lỗi thường gặp
