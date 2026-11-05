@@ -36,13 +36,13 @@ Cần cài thêm để test (không bắt buộc để chạy):
 Mở **PowerShell**, chạy từng lệnh:
 
 ```powershell
-git clone <địa-chỉ-repo>
-cd <thư-mục-repo>
+git clone https://github.com/NgDuyDuc84/Nhom8_LapTrinhMang.git
+cd Nhom8_LapTrinhMang
 
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 Nếu PowerShell báo lỗi "running scripts is disabled", chạy lệnh này rồi kích hoạt lại venv:
@@ -130,7 +130,7 @@ trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu tracerout
 **Chạy test:**
 
 ```powershell
-pytest
+python -m pytest -q
 ```
 
 ### 5.1. Kiểm tra khi tắt và bật lại mạng
@@ -272,7 +272,7 @@ có thể không hiển thị rõ.
 | Thiết bị | IP/MAC từ ARP, tên/ghi chú đã lưu, Online/Offline hoặc chưa xác minh; tin cậy, chưa tin cậy, MAC cục bộ và thời điểm thấy gần nhất | MAC cục bộ được tính từ bit của địa chỉ thật, không đồng nghĩa với thiết bị lạ |
 | Cảnh báo | Danh sách 20 cảnh báo gần nhất, màu mức độ và thông báo qua khay hệ thống | Chưa có bộ lọc, tìm kiếm hoặc gửi Zalo trên UI |
 | Chẩn đoán | Nhận đúng kết luận từ backend; bảng địa chỉ đích, RTT mới nhất, mất gói của 30 mẫu lịch sử và lỗi đo; đồ thị RTT lịch sử 30 phút | Không tự kết luận `ok` từ bản ghi cũ hoặc khi chưa đủ mẫu; chưa có biểu đồ mất gói riêng |
-| Báo cáo | Chọn khoảng thời gian và đường dẫn lưu PDF | `extras/pdf_report.py` của bản đang làm còn là khung nên chưa xuất được PDF |
+| Báo cáo | Chọn khoảng thời gian và đường dẫn lưu PDF, gọi `extras/pdf_report.py` | Cần cài đủ thư viện xuất báo cáo, gồm ReportLab và Matplotlib |
 | Khay hệ thống | Ẩn, mở lại, thoát và hiện thông báo | Không phải gửi thông báo Zalo |
 
 Các chức năng lõi chưa có nút riêng trên UI: traceroute, chốt baseline, lịch sử
@@ -284,9 +284,8 @@ online/offline từng thiết bị, xuất CSV, quét kênh Wi-Fi và demo Zalo.
 .\.venv\Scripts\python.exe main.py --cli baseline
 ```
 
-Phần tra hãng OUI của bản hiện tại còn là khung nên hãng có thể hiện **Chưa xác
-định**; chương trình không tự gán hãng mẫu. Tên/ghi chú do người dùng đặt và lịch sử
-đã lưu vẫn được giữ nguyên.
+Hãng được tra từ `data/oui.csv`; MAC chưa có trong danh sách sẽ hiện **Chưa xác
+định**. Tên/ghi chú do người dùng đặt và lịch sử đã lưu vẫn được giữ nguyên.
 
 ## 6. Lỗi thường gặp
 
