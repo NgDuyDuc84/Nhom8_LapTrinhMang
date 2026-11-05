@@ -3,7 +3,6 @@
 Cách dùng (chạy từ gốc repo, terminal Administrator khi cần gói tin thô):
 
     python main.py                 # mở giao diện, dữ liệu thật (giai đoạn 8)
-    python main.py --fake          # mở giao diện với dữ liệu giả (giai đoạn 8)
     python main.py --cli scan      # quét ARP, in bảng IP/MAC (giai đoạn 3)
     python main.py --cli monitor    # theo dõi thiết bị, in cảnh báo (giai đoạn 5)
     python main.py --cli trace 1.1.1.1   # traceroute (giai đoạn 6)
@@ -36,11 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--cli",
         action="store_true",
         help="chạy ở chế độ dòng lệnh (không mở giao diện)",
-    )
-    parser.add_argument(
-        "--fake",
-        action="store_true",
-        help="dùng dữ liệu giả thay cho dữ liệu mạng thật",
     )
     parser.add_argument(
         "command",
@@ -113,7 +107,7 @@ def run_monitor() -> int:
     from services.scan_loop import ScanLoop
 
     database.initialize()
-    problems = check_environment()
+    problems = check_environment(require_network=False)
     if problems:
         for problem in problems:
             print(f"LỖI môi trường: {problem}")
@@ -125,11 +119,11 @@ def run_monitor() -> int:
     try:
         iface = get_active_interface()
     except RuntimeError as exc:
-        print(f"LỖI: {exc}")
-        database.close()
-        return 1
+        iface = None
+        print(f"Đang chờ kết nối LAN: {exc}")
 
-    print(f"\nTheo dõi {iface.name} ({iface.ip}/{iface.netmask}), quét mỗi {SCAN_INTERVAL_SEC:.0f} giây.")
+    label = f"{iface.name} ({iface.ip}/{iface.netmask})" if iface else "kết nối LAN (đang chờ)"
+    print(f"\nTheo dõi {label}, quét mỗi {SCAN_INTERVAL_SEC:.0f} giây.")
     if baseline.is_first_run():
         print("Lần đầu chạy: đang lập đường cơ sở, CHƯA cảnh báo thiết bị lạ.")
         print("Khi đã thấy đủ thiết bị của mình, mở terminal khác chạy: python main.py --cli baseline")
@@ -147,23 +141,35 @@ def run_monitor() -> int:
     def on_alert(alert) -> None:
         print(f"[{alert.ts:%H:%M:%S}] CẢNH BÁO ({alert.level}): {alert.message}")
 
-    detector = ArpAnomalyDetector(iface.gateway, repository.list_devices())
+    detector = None
+    listener = None
 
     def on_arp_observation(observation) -> None:
+        if detector is None:
+            return
         for alert in detector.observe(observation):
             on_alert(alert)
 
-    listener = ArpListener(
-        on_observation=on_arp_observation,
-        iface=iface,
-    )
-    try:
-        listener.start()
+    def on_interface(chosen) -> None:
+        nonlocal detector, listener
+        if listener is not None:
+            listener.stop()
+            listener = None
+        detector = None
+        if chosen is None:
+            print("Mất kết nối LAN; chờ kết nối lại ở chu kỳ quét sau.")
+            return
+        detector = ArpAnomalyDetector(chosen.gateway, repository.list_devices())
+        listener = ArpListener(on_observation=on_arp_observation, iface=chosen)
+        try:
+            listener.start()
+        except RuntimeError as exc:
+            listener = None
+            print(f"Lưu ý: không bật được nghe ARP: {exc}")
+            return
         print("Đang nghe ARP thụ động để phát hiện IP/MAC bất thường.")
-    except RuntimeError as exc:
-        print(f"Lưu ý: không bật được nghe ARP: {exc}")
 
-    loop = ScanLoop(on_device=on_device, on_alert=on_alert, iface=iface)
+    loop = ScanLoop(on_device=on_device, on_alert=on_alert, iface=iface, on_interface=on_interface)
     try:
         loop.start()
         while loop.is_running():
@@ -172,7 +178,8 @@ def run_monitor() -> int:
         print("\nĐang dừng...")
     finally:
         loop.stop()
-        listener.stop()
+        if listener is not None:
+            listener.stop()
         database.close()
     print("Đã dừng theo dõi.")
     return 0
@@ -219,7 +226,7 @@ def run_diagnose() -> int:
     from models import now
     from services.ping_monitor import PingMonitor
 
-    problems = check_environment()
+    problems = check_environment(require_network=False)
     if problems:
         for problem in problems:
             print(f"LỖI môi trường: {problem}")
@@ -228,14 +235,17 @@ def run_diagnose() -> int:
         print(f"Cảnh báo: {warning}")
 
     database.initialize()
-    iface = get_active_interface()
+    try:
+        iface = get_active_interface()
+    except RuntimeError:
+        iface = None
 
     def show_cycle(results) -> None:
         parts: list[str] = []
         for target in ("router", "isp", "external"):
             result = results.get(target)
             if result is None:
-                parts.append(f"{target}=đang tìm")
+                parts.append(f"{target}={monitor.target_status.get(target, 'chưa đo được')}")
             elif result.rtt_ms is None:
                 parts.append(f"{target}=mất gói")
             else:
@@ -250,10 +260,8 @@ def run_diagnose() -> int:
         on_diagnosis=show_diagnosis,
         iface=iface,
     )
-    print(
-        f"Chẩn đoán mạng qua {iface.name} ({iface.ip}, gateway {iface.gateway}); "
-        "nhấn Ctrl+C để dừng."
-    )
+    label = f"{iface.name} ({iface.ip}, gateway {iface.gateway or 'chưa có'})" if iface else "LAN (đang chờ kết nối)"
+    print(f"Chẩn đoán mạng qua {label}; nhấn Ctrl+C để dừng.")
     try:
         monitor.start()
         while monitor.is_running():
@@ -270,16 +278,18 @@ def run_diagnose() -> int:
     return 0
 
 
-def run_gui(fake: bool = False) -> int:
-    """Khởi động giao diện B với Backend thật hoặc dữ liệu giả."""
+def run_gui() -> int:
+    """Khởi động giao diện với dịch vụ giám sát mạng."""
     from PySide6.QtWidgets import QApplication, QMessageBox
+    from ui.theme import apply_light_theme
 
     app = QApplication.instance() or QApplication(sys.argv)
-    if not fake:
-        problems = check_environment()
-        if problems:
-            QMessageBox.critical(app.activeWindow(), "Không thể khởi động NetGuard", "\n".join(problems))
-            return 1
+    apply_light_theme(app)
+    problems = check_environment(require_network=False)
+    if problems:
+        QMessageBox.critical(app.activeWindow(), "Không thể khởi động NetGuard", "\n".join(problems))
+        return 1
+    warnings = get_warnings()
 
     if importlib.util.find_spec("ui.main_window") is None:
         message = (
@@ -291,15 +301,10 @@ def run_gui(fake: bool = False) -> int:
     try:
         from ui.main_window import MainWindow
 
-        if fake:
-            from ui.fake_data import FakeBackend
+        from backend import Backend
 
-            backend = FakeBackend()
-        else:
-            from backend import Backend
-
-            backend = Backend()
-        window = MainWindow(backend)
+        backend = Backend()
+        window = MainWindow(backend, warnings=warnings)
         backend.start()
     except Exception as exc:
         if "backend" in locals():
@@ -339,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cli:
         return run_cli(args.command, args.target)
-    return run_gui(fake=args.fake)
+    return run_gui()
 
 
 if __name__ == "__main__":

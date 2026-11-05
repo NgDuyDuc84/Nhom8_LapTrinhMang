@@ -121,8 +121,8 @@ monitor chạy liên tục đến Ctrl+C. Lần đầu, để chương trình nh
 sau đó mở terminal thứ hai và chạy `python main.py --cli baseline`. Sau khi chốt baseline,
 thiết bị mới chưa tin cậy sẽ bị cảnh báo.
 
-Giao diện dùng `python main.py` hoặc `python main.py --fake`. Cả hai chế độ cần
-`ui/main_window.py` của B; file này chưa có trong repo hiện tại. `--fake` không gửi gói mạng.
+Giao diện đã có trong `ui/main_window.py` và `ui/tray.py`
+của HuyTien trên nhánh `feature/gui-monitor`. Xem cách mở ở mục 5.4.
 
 Windows `tracert.exe` gửi ba probe cho mỗi TTL; thời gian chờ có thể dài khi nhiều hop không
 trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu traceroute.
@@ -132,6 +132,161 @@ trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu tracerout
 ```powershell
 pytest
 ```
+
+### 5.1. Kiểm tra khi tắt và bật lại mạng
+
+Mở PowerShell bằng quyền Administrator, kích hoạt `.venv`, sau đó chạy:
+
+```powershell
+python main.py --cli diagnose
+```
+
+Tắt Wi-Fi hoặc rút cáp mạng trong khi lệnh đang chạy. Chương trình báo máy mất
+kết nối LAN và tiếp tục chờ. Bật Wi-Fi/cắm cáp lại: chương trình tự đọc lại IP,
+mặt nạ và gateway mỗi chu kỳ ping (khoảng 2 giây), rồi thu thập mẫu mới để chẩn đoán.
+Nếu card có IP nhưng thiếu gateway, chương trình báo rõ `không có gateway`.
+Lỗi tạo/gửi socket được hiển thị là `lỗi đo`, không được ghi thành mất gói 100%.
+Các kết luận dựa trên ping cần ít nhất 10 mẫu và giữ ổn định 3 chu kỳ.
+
+Với lệnh theo dõi thiết bị:
+
+```powershell
+python main.py --cli monitor
+```
+
+Chương trình đọc lại cấu hình card ở mỗi chu kỳ quét (30 giây), mở lại bộ nghe ARP
+khi cấu hình thay đổi và tự quét tiếp khi kết nối trở lại. Một lần quét lỗi không
+được dùng để kết luận tất cả thiết bị đã offline. Các lệnh `monitor` và `diagnose`
+có thể khởi động khi chưa kết nối LAN; quyền Administrator và Npcap vẫn cần thiết.
+Sau khi chọn được card, chương trình tiếp tục theo dõi card đó. Muốn đổi sang card
+khác, dừng bằng Ctrl+C và chạy lại lệnh.
+
+Các lệnh chạy một lần như `scan` hoặc `trace` báo lỗi rõ khi chưa kết nối; cần chạy
+lại sau khi có mạng. Traceroute ra Internet cần gateway. Nếu chỉ ngắt đường Internet
+của router trong khi máy vẫn nối Wi-Fi, router vẫn có thể ping được; đây là tình
+huống khác với tắt card Wi-Fi của máy.
+
+### 5.2. Chạy các tính năng phụ
+
+Chạy từ thư mục gốc dự án trong PowerShell:
+
+```powershell
+cd D:\Nhom8_LapTrinhMang
+.\.venv\Scripts\Activate.ps1
+```
+
+**Quét Wi-Fi xung quanh và gợi ý kênh 2.4 GHz:**
+
+```powershell
+python -m extras.wifi_channels
+```
+
+Tính năng dùng `netsh wlan show networks mode=bssid` trên Windows. Cần bật card
+Wi-Fi; không bắt buộc có Internet. Nếu Windows chặn quét, kiểm tra dịch vụ WLAN
+AutoConfig và quyền truy cập vị trí trong Settings. Khi không quét được hoặc không
+có dữ liệu 2.4 GHz, chương trình báo chưa đủ dữ liệu và không đề xuất mặc định kênh 1.
+Khi có dữ liệu, gợi ý chọn trong các kênh 1, 6, 11 dựa trên tín hiệu và độ chồng lấn;
+đây là ước lượng, không tự đổi kênh trên router.
+
+**Mô phỏng trùng IP, thiết bị mới và thiết bị mất kết nối:**
+
+```powershell
+python tests/simulate/simulate_network.py
+```
+
+Lệnh dùng dữ liệu giả, chạy được khi offline và không gửi gói tin mạng.
+
+**Demo nội dung cảnh báo Zalo:**
+
+```powershell
+python -m extras.zalo_notify
+```
+
+Lệnh chỉ in cảnh báo mẫu ra terminal, chạy được khi offline. Chưa tích hợp Zalo
+Official Account API nên **chưa gửi tin nhắn Zalo thật** và chưa tự nối vào luồng
+cảnh báo của `monitor`. Hàm `send_zalo_alert(..., dry_run=False)` trả trạng thái
+`not_configured`, không báo gửi thành công.
+
+### 5.3. Chạy kiểm thử
+
+Các bài test dưới đây dùng dữ liệu giả/mô phỏng, không cần Internet hay quyền Admin.
+
+```powershell
+# Quy tắc chẩn đoán mạng (12 test)
+python -m pytest tests/test_diagnosis.py -v
+
+# Mô phỏng mạng (4 test)
+python -m pytest tests/test_simulate_network.py -v
+
+# Demo cảnh báo Zalo (4 test)
+python -m pytest tests/test_zalo_notify.py -v
+
+# Chạy chung 20 test trong tài liệu DTG1
+python -m pytest tests/test_diagnosis.py tests/test_simulate_network.py tests/test_zalo_notify.py -v
+
+# Hồi quy mất/kết nối lại mạng và quét kênh Wi-Fi
+python -m pytest tests/test_network_recovery.py tests/test_wifi_channels.py -v
+
+# Toàn bộ test, gồm cả các tình huống hồi quy mới
+python -m pytest -q
+```
+
+Các bài test tự động không thay thế bước kiểm tra tắt/bật card thật ở mục 5.1.
+
+### 5.4. Mở giao diện của HuyTien
+
+Nhấp đúp `Mo_NetGuard.cmd` rồi chấp nhận hộp thoại quyền Administrator của Windows
+để mở. File này chạy `main.py` và kết nối các dịch vụ giám sát mạng.
+
+Hoặc mở PowerShell bằng **Run as administrator** và chạy:
+
+```powershell
+cd D:\Nhom8_LapTrinhMang
+
+.\.venv\Scripts\python.exe main.py
+```
+
+UI hiển thị card mạng, IPv4/mặt nạ và gateway. Thiết bị lấy
+từ quét ARP; các mẫu RTT/mất gói và kết luận lấy từ dịch vụ ICMP. Không tự sinh
+thiết bị, cảnh báo hoặc kết luận bình thường khi chưa đo được. Thiếu dữ liệu sẽ
+hiện trạng thái chờ hoặc lỗi đo. Vẫn cần Npcap và quyền Administrator; nếu chưa nối
+LAN, cửa sổ mở để chờ mạng và tự đo khi kết nối lại.
+
+`python -m ui.main_window` và `python ui/main_window.py` cũng mở giao diện qua cùng
+đường khởi động. UI không còn chế độ demo hoặc tham số `--fake`.
+
+Các thiết bị từ CSDL cũ hiện **Chưa xác minh trong phiên** cho đến khi được quan
+sát trong phiên hiện tại. Khi mất LAN, trạng thái hiển thị là chưa xác minh thay
+vì coi các trạng thái Online đã lưu là dữ liệu đang đo. Cột **Thấy gần nhất** và
+đồ thị **lịch sử 30 phút** cho biết thời điểm của dữ liệu. Dừng ứng dụng cũ rồi mở
+lại để nạp mã mới.
+
+Không thêm `--cli` khi muốn mở cửa sổ. Đóng bằng nút **X** sẽ ẩn cửa sổ xuống khay
+hệ thống. Nhấp phải biểu tượng NetGuard cạnh đồng hồ, chọn **Mở NetGuard** để hiện
+lại hoặc **Thoát** để kết thúc ứng dụng. Có thể cần bấm dấu mũi tên ở khay để thấy
+biểu tượng; bản UI này dùng biểu tượng theo theme nên trên một số máy biểu tượng
+có thể không hiển thị rõ.
+
+| Phần giao diện | Chức năng đã nối | Giới hạn hiện tại |
+|---|---|---|
+| Thiết bị | IP/MAC từ ARP, tên/ghi chú đã lưu, Online/Offline hoặc chưa xác minh; tin cậy, chưa tin cậy, MAC cục bộ và thời điểm thấy gần nhất | MAC cục bộ được tính từ bit của địa chỉ thật, không đồng nghĩa với thiết bị lạ |
+| Cảnh báo | Danh sách 20 cảnh báo gần nhất, màu mức độ và thông báo qua khay hệ thống | Chưa có bộ lọc, tìm kiếm hoặc gửi Zalo trên UI |
+| Chẩn đoán | Nhận đúng kết luận từ backend; bảng địa chỉ đích, RTT mới nhất, mất gói của 30 mẫu lịch sử và lỗi đo; đồ thị RTT lịch sử 30 phút | Không tự kết luận `ok` từ bản ghi cũ hoặc khi chưa đủ mẫu; chưa có biểu đồ mất gói riêng |
+| Báo cáo | Chọn khoảng thời gian và đường dẫn lưu PDF | `extras/pdf_report.py` của bản đang làm còn là khung nên chưa xuất được PDF |
+| Khay hệ thống | Ẩn, mở lại, thoát và hiện thông báo | Không phải gửi thông báo Zalo |
+
+Các chức năng lõi chưa có nút riêng trên UI: traceroute, chốt baseline, lịch sử
+online/offline từng thiết bị, xuất CSV, quét kênh Wi-Fi và demo Zalo. Đánh dấu
+**Tin cậy tất cả** chỉ thay đổi cờ tin cậy, không gọi `finish_baseline()`.
+Để chốt baseline cho chế độ mạng thật sau khi đã quét đủ thiết bị, mở PowerShell khác:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --cli baseline
+```
+
+Phần tra hãng OUI của bản hiện tại còn là khung nên hãng có thể hiện **Chưa xác
+định**; chương trình không tự gán hãng mẫu. Tên/ghi chú do người dùng đặt và lịch sử
+đã lưu vẫn được giữ nguyên.
 
 ## 6. Lỗi thường gặp
 

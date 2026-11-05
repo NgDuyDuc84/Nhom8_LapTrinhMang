@@ -10,14 +10,11 @@ from icmplib.exceptions import ICMPLibError
 __all__ = ["ping_once", "ping_series"]
 
 
-def _source_address() -> str | None:
+def _source_address() -> str:
     """Chọn IP nguồn của card LAN đang hoạt động nếu xác định được."""
-    try:
-        from core.interfaces import get_active_interface
+    from core.interfaces import get_active_interface
 
-        return get_active_interface().ip or None
-    except (ImportError, RuntimeError, OSError):
-        return None
+    return get_active_interface().ip
 
 
 def _friendly_error(exc: Exception) -> RuntimeError:
@@ -33,10 +30,12 @@ def _friendly_error(exc: Exception) -> RuntimeError:
         )
     if "npcap" in message or "wpcap" in message:
         return RuntimeError("Chưa cài Npcap hoặc Npcap chưa chạy; hãy kiểm tra dịch vụ Npcap.")
+    if any(marker in message for marker in ("cannot be assigned", "10049", "address not available")):
+        return RuntimeError("IP nguồn không còn thuộc card mạng. Hãy kiểm tra kết nối Wi-Fi/Ethernet.")
     return RuntimeError(f"Không ping được đích mạng: {exc}")
 
 
-def ping_once(addr: str, timeout: float = 1.0) -> float | None:
+def ping_once(addr: str, timeout: float = 1.0, *, source: str | None = None) -> float | None:
     """Ping một lần; trả RTT theo mili giây hoặc ``None`` nếu không có phản hồi."""
     if not addr.strip():
         raise ValueError("Địa chỉ ping không được để trống.")
@@ -49,7 +48,7 @@ def ping_once(addr: str, timeout: float = 1.0) -> float | None:
             count=1,
             interval=0,
             timeout=timeout,
-            source=_source_address(),
+            source=source or _source_address(),
             family=4,
             privileged=True,
         )

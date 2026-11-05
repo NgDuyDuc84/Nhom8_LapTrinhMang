@@ -107,7 +107,8 @@ def scan_subnet(
     try:
         sniffer.start()
         time.sleep(SNIFFER_WARMUP_SEC)  # đợi Npcap mở xong handle rồi mới gửi
-        requests = [Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip) for ip in hosts]
+        requests = [Ether(src=iface.mac, dst="ff:ff:ff:ff:ff:ff") /
+                    ARP(hwsrc=iface.mac, psrc=iface.ip, pdst=ip) for ip in hosts]
         for _ in range(max(1, int(rounds))):
             # Giãn cách 1 ms/gói: gửi dồn 254 gói một lúc dễ bị router/AP bỏ bớt.
             sendp(requests, iface=scapy_iface, verbose=0, inter=0.001)

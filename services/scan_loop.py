@@ -69,11 +69,19 @@ class ScanLoop:
         interval: float = SCAN_INTERVAL_SEC,
         iface: NetInterface | None = None,
         scanner: Callable[[NetInterface], list[ScanEntry]] | None = None,
+        interface_resolver: Callable[[], NetInterface] | None = None,
+        on_interface: Callable[[NetInterface | None], None] | None = None,
+        on_scan: Callable[[list[ScanEntry]], None] | None = None,
     ) -> None:
         self._on_device = on_device or (lambda device, event: None)
         self._on_alert = on_alert or (lambda alert: None)
         self._interval = max(1.0, float(interval))
         self._iface = iface
+        self._preferred_iface = iface
+        self._resolve_interface = interface_resolver or (lambda: get_active_interface(self._preferred_iface))
+        self._on_interface = on_interface or (lambda chosen: None)
+        self._on_scan = on_scan or (lambda entries: None)
+        self._network_key: tuple | None = None
         self._scanner = scanner or (lambda chosen: scan_subnet(chosen))
         self._misses: dict[str, int] = {}
         self._stop_event = threading.Event()
@@ -119,7 +127,14 @@ class ScanLoop:
     # ------------------------------------------------------------------ một lần quét
     def scan_once(self) -> list[ScanEntry]:
         """Quét một lần và cập nhật CSDL; trả về các ``ScanEntry`` vừa thấy."""
-        iface = self._iface or get_active_interface()
+        try:
+            iface = self._resolve_interface()
+        except (RuntimeError, OSError, ValueError):
+            self._update_interface(None)
+            raise
+        if self._preferred_iface is None:
+            self._preferred_iface = iface
+        self._update_interface(iface)
         entries = self._scanner(iface)
         moment = now()
         seen: set[str] = set()
@@ -162,7 +177,17 @@ class ScanLoop:
                     self._on_alert(alert)
 
         self._mark_offline(seen, moment)
+        self._on_scan(entries)
         return entries
+
+    def _update_interface(self, iface: NetInterface | None) -> None:
+        key = (iface.index, iface.ip, iface.netmask, iface.gateway) if iface else None
+        self._iface = iface
+        # Listener và bộ đếm vắng mặt phải theo cấu hình kết nối mới.
+        if key != self._network_key:
+            self._misses.clear()
+            self._on_interface(iface)
+            self._network_key = key
 
     def _mark_offline(self, seen: set[str], moment) -> None:
         """Đếm số lần vắng mặt; đủ ``OFFLINE_AFTER_MISSES`` thì đánh dấu offline."""

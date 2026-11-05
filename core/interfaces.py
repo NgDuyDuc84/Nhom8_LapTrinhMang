@@ -105,6 +105,38 @@ class _MIB_IPFORWARDROW(ctypes.Structure):
     ]
 
 
+class _MIB_IFROW(ctypes.Structure):
+    """Thông tin trạng thái kết nối từ GetIfTable (ifmib.h)."""
+
+    _fields_ = [
+        ("wszName", wintypes.WCHAR * 256),
+        *[(name, wintypes.DWORD) for name in (
+            "dwIndex", "dwType", "dwMtu", "dwSpeed", "dwPhysAddrLen",
+        )],
+        ("bPhysAddr", ctypes.c_ubyte * 8),
+        *[(name, wintypes.DWORD) for name in (
+            "dwAdminStatus", "dwOperStatus", "dwLastChange", "dwInOctets",
+            "dwInUcastPkts", "dwInNUcastPkts", "dwInDiscards", "dwInErrors",
+            "dwInUnknownProtos", "dwOutOctets", "dwOutUcastPkts", "dwOutNUcastPkts",
+            "dwOutDiscards", "dwOutErrors", "dwOutQLen", "dwDescrLen",
+        )],
+        ("bDescr", ctypes.c_ubyte * 256),
+    ]
+
+
+def _link_table() -> dict[int, bool]:
+    """Đọc lại trạng thái thật; không suy ra kết nối từ IP Scapy còn lưu."""
+    try:
+        lib = _iphlpapi()
+        lib.GetIfTable.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.ULONG), wintypes.BOOL]
+        return {
+            int(row.dwIndex): int(row.dwAdminStatus) == 1 and int(row.dwOperStatus) in (4, 5)
+            for row in _read_table(lib.GetIfTable, _MIB_IFROW)
+        }
+    except (AttributeError, OSError):
+        return {}
+
+
 def _iphlpapi() -> ctypes.WinDLL:
     """Mở thư viện iphlpapi của Windows (chỉ dùng trên Windows)."""
     return ctypes.WinDLL("iphlpapi", use_last_error=True)
@@ -127,7 +159,8 @@ def _read_table(func, row_type: type) -> list:
     count = ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value
     offset = ctypes.sizeof(wintypes.DWORD)
     rows = ctypes.cast(ctypes.addressof(buffer) + offset, ctypes.POINTER(row_type))
-    return [rows[i] for i in range(count)]
+    # Sao chép trước khi buffer cục bộ được giải phóng.
+    return [row_type.from_buffer_copy(rows[i]) for i in range(count)]
 
 
 def _ipv4_table() -> dict[int, tuple[str, str]]:
@@ -137,7 +170,11 @@ def _ipv4_table() -> dict[int, tuple[str, str]]:
         lib = _iphlpapi()
         lib.GetIpAddrTable.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.ULONG), wintypes.BOOL]
         for row in _read_table(lib.GetIpAddrTable, _MIB_IPADDRROW):
-            result[int(row.dwIndex)] = (_dword_to_ip(row.dwAddr), _dword_to_ip(row.dwMask))
+            if int(row.wType) & (0x0008 | 0x0040 | 0x0080):
+                continue  # disconnected, deleted hoặc transient
+            ip = _dword_to_ip(row.dwAddr)
+            if _has_usable_ipv4(ip):
+                result.setdefault(int(row.dwIndex), (ip, _dword_to_ip(row.dwMask)))
     except (AttributeError, OSError):
         pass
     return result
@@ -210,18 +247,12 @@ def _is_virtual(name: str, description: str) -> bool:
 
 def _has_usable_ipv4(ip: str) -> bool:
     """True nếu card có IPv4 dùng được (không rỗng, không link-local, không loopback)."""
-    if not ip or ip.startswith("169.254.") or ip.startswith("127."):
+    try:
+        address = ipaddress.IPv4Address(ip)
+    except ipaddress.AddressValueError:
         return False
-    return True
-
-
-def _pick_ipv4(ips) -> str:
-    """Chọn IPv4 phù hợp nhất trong ``iface.ips[4]``: ưu tiên địa chỉ dùng được."""
-    candidates = list(ips or [])
-    for ip in candidates:
-        if _has_usable_ipv4(ip):
-            return ip
-    return candidates[0] if candidates else ""
+    return not (address.is_unspecified or address.is_loopback or address.is_link_local
+                or address.is_multicast or int(address) == 0xFFFFFFFF)
 
 
 def list_interfaces() -> list[NetInterface]:
@@ -233,13 +264,15 @@ def list_interfaces() -> list[NetInterface]:
 
     addresses = _ipv4_table()
     gateways = _gateway_table()
+    links = _link_table()
     interfaces: list[NetInterface] = []
 
+    known_indices = {int(getattr(item, "index", 0) or 0) for item in conf.ifaces.values()}
+    if set(addresses) - known_indices:
+        conf.ifaces.reload()  # Windows có thể cấp IfIndex mới sau khi bật lại card.
     for iface in conf.ifaces.values():
         index = int(getattr(iface, "index", 0) or 0)
         ipv4, netmask = addresses.get(index, ("", ""))
-        if not ipv4:
-            ipv4 = _pick_ipv4(getattr(iface, "ips", {}).get(4))
         name = str(getattr(iface, "name", "") or "")
         description = str(getattr(iface, "description", "") or "")
         interfaces.append(
@@ -251,7 +284,7 @@ def list_interfaces() -> list[NetInterface]:
                 gateway=gateways.get(index, ""),
                 mac=str(getattr(iface, "mac", "") or "").lower(),
                 is_virtual=_is_virtual(name, description),
-                is_up=_has_usable_ipv4(ipv4),
+                is_up=links.get(index, False) and _has_usable_ipv4(ipv4) and bool(netmask),
                 index=index,
             )
         )
@@ -260,16 +293,24 @@ def list_interfaces() -> list[NetInterface]:
     return interfaces
 
 
-def get_active_interface() -> NetInterface:
+def get_active_interface(preferred: NetInterface | None = None) -> NetInterface:
     """Trả về card thật đang dùng để ra Internet.
 
     Ưu tiên: card thật, đang hoạt động, có cổng mặc định, và là card mà Windows
     chọn cho đường ra Internet. Ném ``RuntimeError`` (tiếng Việt) nếu không có.
     """
     interfaces = list_interfaces()
-    candidates = [i for i in interfaces if i.is_up and not i.is_virtual and i.gateway]
+    usable = [i for i in interfaces if i.is_up and not i.is_virtual
+              and _has_usable_ipv4(i.ip) and i.netmask]
+    if preferred is not None:
+        for candidate in usable:
+            if ((preferred.mac and candidate.mac == preferred.mac)
+                    or candidate.name == preferred.name):
+                return candidate
+        raise RuntimeError(f"Card '{preferred.name}' đang mất kết nối LAN hoặc chưa có IPv4/mặt nạ mạng.")
+    candidates = [i for i in usable if i.gateway]
     if not candidates:  # nới lỏng: card thật đang hoạt động nhưng thiếu cổng mặc định
-        candidates = [i for i in interfaces if i.is_up and not i.is_virtual]
+        candidates = usable
     if not candidates:
         raise RuntimeError(
             "Không tìm thấy card mạng thật nào đang hoạt động. "
@@ -300,21 +341,21 @@ def get_subnet_hosts(iface: NetInterface) -> list[str]:
     except ValueError as exc:
         raise ValueError(f"Không hiểu địa chỉ {iface.ip}/{iface.netmask}: {exc}") from exc
 
-    hosts = [str(host) for host in network.hosts()]
-    if len(hosts) > MAX_SCAN_HOSTS:
+    host_count = network.num_addresses if network.prefixlen >= 31 else network.num_addresses - 2
+    if host_count > MAX_SCAN_HOSTS:
         raise ValueError(
-            f"Dải {network} có {len(hosts)} địa chỉ host, vượt giới hạn "
+            f"Dải {network} có {host_count} địa chỉ host, vượt giới hạn "
             f"MAX_SCAN_HOSTS = {MAX_SCAN_HOSTS}. Hãy chọn mạng nhỏ hơn (ví dụ /24)."
         )
-    return hosts
+    return [str(host) for host in network.hosts()]
 
 
-def check_environment() -> list[str]:
+def check_environment(require_network: bool = True) -> list[str]:
     """Kiểm tra môi trường và trả về danh sách vấn đề **chặn chạy**, bằng tiếng Việt.
 
-    Danh sách rỗng nghĩa là chạy được. Chỉ gồm ba điều kiện bắt buộc: quyền
-    Administrator, Npcap và card mạng hợp lệ. Cảnh báo không chặn chạy (ví dụ VPN
-    đang bật) nằm ở ``get_warnings()`` để giao diện hiển thị mà vẫn cho khởi động.
+    Kiểm tra quyền Administrator, Npcap và card mạng hợp lệ. Truyền
+    ``require_network=False`` cho các chế độ liên tục có thể chờ kết nối.
+    Cảnh báo không chặn chạy (ví dụ VPN) nằm ở ``get_warnings()``.
     """
     problems: list[str] = []
     if not is_admin():
@@ -327,10 +368,11 @@ def check_environment() -> list[str]:
             "Chưa cài Npcap hoặc Npcap chưa chạy: tải bản mới nhất ở https://npcap.com, "
             "cài xong kiểm tra bằng lệnh 'sc query npcap'."
         )
-    try:
-        get_active_interface()
-    except RuntimeError as exc:
-        problems.append(str(exc))
+    if require_network:
+        try:
+            get_active_interface()
+        except RuntimeError as exc:
+            problems.append(str(exc))
     return problems
 
 

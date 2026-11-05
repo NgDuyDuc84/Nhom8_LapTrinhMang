@@ -3,7 +3,6 @@
 Quy ước:
 - ``BackendBase`` khai báo signal và chữ ký hàm; hàm chưa làm thì ``raise NotImplementedError``.
 - ``Backend`` là bản thật (làm dần từ giai đoạn 5), dùng Scapy/icmplib/SQLite.
-- ``FakeBackend`` (trong ``ui/fake_data.py``) dùng dữ liệu giả, để B làm giao diện trước.
 - Chỉ file này được import PySide6; ``core/`` và ``services/`` chỉ phát sự kiện qua callback.
 """
 
@@ -21,7 +20,7 @@ from models import Alert, Device, Diagnosis, Hop, PingResult, now
 
 
 class BackendBase(QObject):
-    """Bộ khung chung mà cả Backend thật và FakeBackend đều kế thừa."""
+    """Hợp đồng giữa giao diện và dịch vụ giám sát mạng."""
 
     # --- Signal: lõi phát sự kiện, giao diện bắt và vẽ lại ---
     device_updated = Signal(object)      # Device: thiết bị mới hoặc vừa đổi trạng thái
@@ -29,6 +28,9 @@ class BackendBase(QObject):
     ping_result = Signal(object)         # PingResult: một mẫu ping mới
     diagnosis_changed = Signal(object)   # Diagnosis: kết luận chẩn đoán vừa đổi
     traceroute_done = Signal(object)     # list[Hop]: traceroute chạy xong
+    connection_changed = Signal(object)  # dict: card, IP, gateway hiện tại
+    measurement_changed = Signal(object) # dict: kết quả và lỗi đo từng chu kỳ
+    devices_refreshed = Signal()         # một lượt quét thật đã hoàn tất
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -41,6 +43,18 @@ class BackendBase(QObject):
     def stop(self) -> None:
         """Tắt các luồng nền và dọn tài nguyên, gọi được nhiều lần."""
         raise NotImplementedError
+
+    def get_connection_status(self) -> dict:
+        return {}
+
+    def get_latest_measurements(self) -> dict:
+        return {}
+
+    def get_latest_diagnosis(self) -> Diagnosis | None:
+        return None
+
+    def get_device_status(self, device: Device) -> str:
+        return "Online" if device.online else "Offline"
 
     # --- Thiết bị ---
     def list_devices(self) -> list[Device]:
@@ -105,44 +119,44 @@ class Backend(BackendBase):
         self._state_lock = threading.RLock()
         self._last_traceroute: tuple[datetime, list[Hop]] | None = None
         self._diagnoses: list[Diagnosis] = []
+        self._connection: dict = {}
+        self._latest_measurements: dict = {}
+        self._session_macs: set[str] = set()
 
     # ------------------------------------------------------------------ vòng đời
     def start(self) -> None:
         """Tạo CSDL (nếu chưa có), bật luồng quét và phát danh sách thiết bị hiện có."""
         from db import database
         from core.interfaces import get_active_interface
-        from core.arp_listener import ArpListener
         from services.ping_monitor import PingMonitor
         from services.scan_loop import ScanLoop
-        from services.alerts import ArpAnomalyDetector
 
         if self._loop is not None:
             return
         database.initialize()
         try:
             iface = get_active_interface()
+        except RuntimeError:
+            iface = None  # Vẫn mở UI để hiển thị mất mạng và chờ kết nối lại.
         except Exception:
             database.close()
             raise
-        devices = repository.list_devices()
-        self._arp_detector = ArpAnomalyDetector(iface.gateway, devices)
-        self._arp_listener = ArpListener(self._emit_arp_observation, iface)
+        self._emit_connection(iface)
         self._loop = ScanLoop(
             on_device=self._emit_device,
             on_alert=self._emit_alert,
             iface=iface,
+            on_interface=self._refresh_arp_interface,
+            on_scan=self._emit_scan,
         )
         self._ping_monitor = PingMonitor(
             on_ping=self.ping_result.emit,
             on_diagnosis=self._emit_diagnosis,
             iface=iface,
+            on_cycle=self._emit_measurements,
+            on_interface=self._emit_connection,
         )
         try:
-            try:
-                self._arp_listener.start()
-            except RuntimeError as exc:
-                self._arp_listener = None
-                self.alert_raised.emit(Alert(level="warning", message=f"Không bật được nghe ARP: {exc}"))
             for device in repository.list_devices():
                 self.device_updated.emit(device)
             self._loop.start()
@@ -155,23 +169,100 @@ class Backend(BackendBase):
         """Dừng luồng quét và đóng kết nối CSDL. Gọi nhiều lần vẫn an toàn."""
         from db import database
 
+        if self._loop is not None:
+            self._loop.stop()
+            self._loop = None
         if self._arp_listener is not None:
             self._arp_listener.stop()
             self._arp_listener = None
         if self._ping_monitor is not None:
             self._ping_monitor.stop()
             self._ping_monitor = None
-        if self._loop is not None:
-            self._loop.stop()
-            self._loop = None
         trace_thread = self._traceroute_thread
         if trace_thread is not None and trace_thread.is_alive():
             self._traceroute_stop.set()
             trace_thread.join(5.0)
         database.close()
 
+    def _refresh_arp_interface(self, iface) -> None:
+        """Mở lại listener và nhận diện gateway khi cấu hình card thay đổi."""
+        from core.arp_listener import ArpListener
+        from services.alerts import ArpAnomalyDetector
+
+        if self._arp_listener is not None:
+            self._arp_listener.stop()
+            self._arp_listener = None
+        self._arp_detector = None
+        if iface is None:
+            return
+        self._arp_detector = ArpAnomalyDetector(iface.gateway, repository.list_devices())
+        self._arp_listener = ArpListener(self._emit_arp_observation, iface)
+        try:
+            self._arp_listener.start()
+        except RuntimeError as exc:
+            self._arp_listener = None
+            self.alert_raised.emit(Alert(level="warning", message=f"Không bật được nghe ARP: {exc}"))
+
+    def _emit_connection(self, iface) -> None:
+        status = {
+            "connected": iface is not None,
+            "name": iface.name if iface else "",
+            "ip": iface.ip if iface else "",
+            "netmask": iface.netmask if iface else "",
+            "gateway": iface.gateway if iface else "",
+        }
+        with self._state_lock:
+            if status == self._connection:
+                return
+            self._connection = status
+            # Các phép đo cũ không thể hiện trạng thái của kết nối mới.
+            self._latest_measurements = {}
+            self._session_macs.clear()
+        self.connection_changed.emit(dict(status))
+
+    def _emit_measurements(self, results) -> None:
+        monitor = self._ping_monitor
+        if monitor is None:
+            return
+        snapshot = {
+            "results": dict(results),
+            "status": dict(monitor.target_status),
+            "addresses": monitor.addresses,
+            "ts": now(),
+        }
+        with self._state_lock:
+            self._latest_measurements = snapshot
+        self.measurement_changed.emit(snapshot)
+
+    def _emit_scan(self, entries) -> None:
+        with self._state_lock:
+            self._session_macs.update(entry.mac.lower() for entry in entries)
+        self.devices_refreshed.emit()
+
+    def get_connection_status(self) -> dict:
+        with self._state_lock:
+            return dict(self._connection)
+
+    def get_latest_measurements(self) -> dict:
+        with self._state_lock:
+            return dict(self._latest_measurements)
+
+    def get_latest_diagnosis(self) -> Diagnosis | None:
+        with self._state_lock:
+            return self._diagnoses[-1] if self._diagnoses else None
+
+    def get_device_status(self, device: Device) -> str:
+        with self._state_lock:
+            if not self._connection.get("connected"):
+                return "Chưa xác minh (mất LAN)"
+            if device.mac.lower() not in self._session_macs:
+                return "Chưa xác minh trong phiên"
+        return "Online" if device.online else "Offline"
+
     def _emit_device(self, device: Device, event: str) -> None:
         """Callback từ luồng quét, chuyển thành signal Qt."""
+        with self._state_lock:
+            self._session_macs.add(device.mac.lower())
         self.device_updated.emit(device)
 
     def _emit_alert(self, alert: Alert) -> None:

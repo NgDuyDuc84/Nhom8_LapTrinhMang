@@ -32,15 +32,14 @@ ui.main_window.MainWindow (B)
   WAL, dùng khóa luồng và lưu thời gian ISO 8601 theo GMT+7.
 - backend.py là cầu nối duy nhất của UI với lõi: khởi động/dừng dịch vụ, cung cấp truy vấn,
   đổi callback nền thành Qt signals, và gom dữ liệu để yêu cầu xuất PDF.
-- ui/fake_data.py cung cấp FakeBackend cho B. UI chọn Backend hoặc FakeBackend nhưng dùng
-  cùng các signal/hàm trong BackendBase.
+- UI dùng Backend qua hợp đồng BackendBase; dữ liệu đến từ dịch vụ mạng và SQLite.
 - extras/ do C sở hữu. Phần A chỉ gọi các module này qua chữ ký đã thống nhất; riêng PDF
   sẽ báo lỗi tiếng Việt nếu build_report còn là stub.
 
 ## Luồng khởi động
 
 1. main.py kiểm tra môi trường rồi tạo QApplication.
-2. Chế độ thật tạo Backend; chế độ --fake tạo FakeBackend.
+2. Tạo Backend và MainWindow; không có chế độ dữ liệu demo trong UI.
 3. Backend.start() mở SQLite, chọn card mạng, rồi chạy quét ARP, nghe ARP và ping nền.
 4. UI nhận Device, Alert, PingResult, Diagnosis và list[Hop] qua signals.
 5. Khi thoát, aboutToQuit gọi Backend.stop() để dừng listener và các luồng nền trước khi

@@ -47,7 +47,10 @@ def diagnose(
     if router.available and router.samples >= DIAG_MIN_SAMPLES and is_bad(router):
         return Diagnosis("home_issue", "Lỗi trong mạng nhà (Wi-Fi, tín hiệu hoặc router).")
 
-    if not router.available or router.samples < DIAG_MIN_SAMPLES:
+    if not router.available:
+        return Diagnosis("unknown", "Không đo được router; hãy kiểm tra gateway và kết nối LAN.")
+
+    if router.samples < DIAG_MIN_SAMPLES:
         return Diagnosis("unknown", "Chưa đủ dữ liệu ping router để kết luận.")
 
     if isp is not None and isp.available and isp.samples >= DIAG_MIN_SAMPLES and is_bad(isp):

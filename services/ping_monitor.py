@@ -53,12 +53,19 @@ class PingMonitor:
         pinger: Callable[[str, float], float | None] | None = None,
         tracer: Callable[..., list] | None = None,
         interval: float = PING_INTERVAL_SEC,
+        interface_resolver: Callable[[], NetInterface] | None = None,
+        on_interface: Callable[[NetInterface | None], None] | None = None,
     ) -> None:
         self._on_ping = on_ping or (lambda result: None)
         self._on_diagnosis = on_diagnosis or (lambda result: None)
         self._on_cycle = on_cycle or (lambda results: None)
+        self._on_interface = on_interface or (lambda chosen: None)
         self._iface = iface
-        self._pinger = pinger or ping_once
+        self._preferred_iface = iface
+        self._resolve_interface = interface_resolver or (lambda: get_active_interface(self._preferred_iface))
+        self._pinger = pinger or (lambda address, timeout: ping_once(
+            address, timeout, source=self._iface.ip,
+        ))
         self._tracer = tracer or trace
         self._interval = max(0.1, float(interval))
         self._history: dict[str, deque[float | None]] = {
@@ -75,12 +82,20 @@ class PingMonitor:
         self._pending_verdict: str | None = None
         self._pending_windows = 0
         self.last_error: str | None = None
+        self.target_status: dict[str, str] = {}
+        self._network_key: tuple | None = None
+        self._network_generation = 0
+        self._last_emitted_text: str | None = None
+        self._addresses: dict[str, str | None] = dict.fromkeys(self._history)
+
+    @property
+    def addresses(self) -> dict[str, str | None]:
+        return dict(self._addresses)
 
     def start(self) -> None:
         """Khởi động ping và việc tìm hop ISP nếu chưa có."""
         if self.is_running():
             return
-        self._iface = self._iface or get_active_interface()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="netguard-ping", daemon=True)
         self._thread.start()
@@ -112,24 +127,57 @@ class PingMonitor:
             self._stop_event.wait(max(0.0, self._interval - (time.monotonic() - cycle_started)))
 
     def _cycle(self) -> None:
-        iface = self._iface or get_active_interface()
+        self.last_error = None
+        self.target_status = {}
+        self._addresses = dict.fromkeys(self._history)
+        try:
+            iface = self._resolve_interface()
+        except (RuntimeError, OSError, ValueError) as exc:
+            self._set_interface(None)
+            self.last_error = str(exc)
+            self.target_status = {name: "chưa kết nối LAN" for name in self._history}
+            self._safe_callback(self._on_cycle, {name: None for name in self._history})
+            self._update_stable_diagnosis(Diagnosis(
+                "home_issue", f"Máy đang mất kết nối LAN hoặc chưa có cấu hình IPv4. {exc}",
+            ), immediate=True)
+            return
+
+        self._set_interface(iface)
+        if self._preferred_iface is None:
+            self._preferred_iface = iface
+        if not iface.gateway:
+            self.target_status = {
+                "router": "không có gateway",
+                "isp": "không có gateway",
+                "external": "chưa đo: không có gateway",
+            }
+            self._safe_callback(self._on_cycle, {name: None for name in self._history})
+            self._update_stable_diagnosis(Diagnosis(
+                "unknown", f"Card '{iface.name}' có IPv4 nhưng không có gateway mặc định; "
+                "chưa thể chẩn đoán đường ra Internet.",
+            ), immediate=True)
+            return
         addresses = {
             "router": iface.gateway or None,
             "isp": self._isp_ip,
             "external": PING_EXTERNAL_TARGET,
         }
+        self._addresses = addresses
         cycle_results: dict[str, PingResult | None] = {name: None for name in addresses}
         for target, address in addresses.items():
             if self._stop_event.is_set():
                 return
             if address is None:
+                self.target_status[target] = "chưa xác định hop (sẽ thử lại)"
                 continue
             try:
                 rtt = self._pinger(address, PING_TIMEOUT_SEC)
             except Exception as exc:
                 self.last_error = str(exc)
                 _log(f"[ping {target}] {exc}")
-                rtt = None
+                self.target_status[target] = f"lỗi đo: {exc}"
+                # Không ghi lỗi tạo/gửi socket thành một mẫu mất gói.
+                continue
             loss_pct = 0.0 if rtt is not None else 100.0
             result = PingResult(target=target, rtt_ms=rtt, loss_pct=loss_pct)
             cycle_results[target] = result
@@ -138,9 +186,26 @@ class PingMonitor:
             self._safe_callback(self._on_ping, result)
 
         self._safe_callback(self._on_cycle, cycle_results)
-        stats = {name: self._stats(name, available=addresses[name] is not None) for name in self._history}
+        stats = {name: self._stats(name, available=cycle_results[name] is not None)
+                 for name in self._history}
         current = diagnose(stats["router"], stats["isp"], stats["external"])
         self._update_stable_diagnosis(current)
+
+    def _set_interface(self, iface: NetInterface | None) -> None:
+        key = (iface.index, iface.name, iface.ip, iface.netmask, iface.gateway) if iface else None
+        with self._route_lock:
+            self._iface = iface
+            if key == self._network_key:
+                return
+            self._network_key = key
+            self._network_generation += 1
+            self._isp_ip = None
+            self._last_route_attempt = 0.0
+            self._pending_windows = 0
+            self._pending_verdict = None
+            for history in self._history.values():
+                history.clear()
+        self._safe_callback(self._on_interface, iface)
 
     def _stats(self, target: str, available: bool) -> TargetStats:
         samples = list(self._history[target])
@@ -158,21 +223,24 @@ class PingMonitor:
             available=available,
         )
 
-    def _update_stable_diagnosis(self, diagnosis: Diagnosis) -> None:
+    def _update_stable_diagnosis(self, diagnosis: Diagnosis, *, immediate: bool = False) -> None:
         if diagnosis.verdict == self._pending_verdict:
             self._pending_windows += 1
         else:
             self._pending_verdict = diagnosis.verdict
             self._pending_windows = 1
 
-        if self._pending_windows < DIAG_STABLE_WINDOWS:
+        if not immediate and self._pending_windows < DIAG_STABLE_WINDOWS:
             return
-        if diagnosis.verdict == self._last_emitted_verdict:
+        if (diagnosis.verdict, diagnosis.text) == (self._last_emitted_verdict, self._last_emitted_text):
             return
         self._last_emitted_verdict = diagnosis.verdict
+        self._last_emitted_text = diagnosis.text
         self._safe_callback(self._on_diagnosis, diagnosis)
 
     def _maybe_start_route_discovery(self) -> None:
+        if self._iface is None or not self._iface.gateway:
+            return
         now = time.monotonic()
         interval = self.ROUTE_RETRY_SEC if self._isp_ip is None else self.ROUTE_REFRESH_SEC
         if now - self._last_route_attempt < interval:
@@ -183,14 +251,14 @@ class PingMonitor:
             self._last_route_attempt = now
             self._route_thread = threading.Thread(
                 target=self._discover_isp,
+                args=(self._iface, self._network_generation),
                 name="netguard-route-discovery",
                 daemon=True,
             )
             self._route_thread.start()
 
-    def _discover_isp(self) -> None:
+    def _discover_isp(self, iface: NetInterface, generation: int) -> None:
         try:
-            iface = self._iface or get_active_interface()
             hops = self._tracer(
                 PING_EXTERNAL_TARGET,
                 max_hops=TRACE_MAX_HOPS,
@@ -198,8 +266,10 @@ class PingMonitor:
                 stop_event=self._stop_event,
             )
             hop = find_isp_hop(hops, iface.gateway)
-            if hop is not None:
-                self._isp_ip = hop.ip
+            with self._route_lock:
+                if generation != self._network_generation or self._stop_event.is_set():
+                    return  # Kết quả traceroute của kết nối cũ không được dùng lại.
+                self._isp_ip = hop.ip if hop is not None else None
         except Exception as exc:
             if not self._stop_event.is_set():
                 self.last_error = str(exc)

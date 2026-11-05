@@ -21,13 +21,21 @@ from models import Hop
 __all__ = ["trace", "find_isp_hop", "mark_latency_jump"]
 
 
-def _require_active_interface() -> None:
+def _require_active_interface(target: str) -> None:
     """Xác nhận có card LAN hoạt động trước khi chạy traceroute."""
     from core.interfaces import get_active_interface
 
     iface = get_active_interface()
     if not iface.ip:
         raise RuntimeError(f"Card '{iface.name}' không có địa chỉ IPv4 để chạy traceroute.")
+    try:
+        is_local = ipaddress.ip_address(target) in ipaddress.ip_network(
+            f"{iface.ip}/{iface.netmask}", strict=False,
+        )
+    except ValueError:
+        is_local = False
+    if not iface.gateway and not is_local:
+        raise RuntimeError(f"Card '{iface.name}' không có gateway để traceroute ra Internet.")
 
 
 def _windows_trace(
@@ -86,6 +94,8 @@ def _windows_trace(
         if not 1 <= ttl <= max_hops:
             continue
         remainder = row_match.group(2)
+        if not rtt_pattern.search(remainder):
+            raise RuntimeError(f"Không gửi được probe traceroute: {line.strip()}")
         ip_matches = ip_pattern.findall(remainder)
         ip = ip_matches[-1] if ip_matches else None
         rtt_values: list[float] = []
@@ -104,6 +114,9 @@ def _windows_trace(
     if not rows:
         details = stderr.strip() or stdout.strip()
         raise RuntimeError(f"Không đọc được kết quả tracert.exe. {details}")
+
+    if process.returncode != 0:
+        raise RuntimeError(f"Traceroute thất bại. {stderr.strip() or stdout.strip()}")
 
     last_ttl = max(rows)
     hops = [rows.get(ttl, Hop(ttl=ttl)) for ttl in range(1, last_ttl + 1)]
@@ -151,7 +164,7 @@ def trace(
         raise ValueError("Thời gian chờ traceroute phải lớn hơn 0.")
 
     try:
-        _require_active_interface()
+        _require_active_interface(target)
         if sys.platform == "win32":
             # Windows tracert dùng ICMP và chọn interface theo routing table của OS.
             # Nó cũng tránh khác biệt raw-socket/Npcap giữa các bản Windows.
