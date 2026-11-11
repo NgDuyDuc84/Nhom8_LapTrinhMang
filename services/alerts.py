@@ -16,6 +16,7 @@ from typing import Iterable, TYPE_CHECKING
 from config import ALERT_DEDUP_MINUTES
 from db import repository
 from models import Alert, Device, now
+from extras.device_identity import device_title
 
 if TYPE_CHECKING:
     from core.arp_listener import ArpObservation
@@ -35,11 +36,11 @@ def make_stranger_alert(device: Device) -> Alert:
     Nếu thiết bị có MAC ngẫu nhiên thì thêm câu giải thích để người dùng không
     hoang mang khi thấy một "thiết bị mới" trùng với điện thoại của mình.
     """
-    message = f"Thiết bị lạ {device.ip} ({device.mac}) vừa vào mạng."
+    message = f'Thiết bị chưa tin cậy "{device_title(device)}" (MAC {device.mac}) vừa xuất hiện trong mạng.'
     if device.vendor and device.vendor != "Unknown":
         message += f" Hãng: {device.vendor}."
     if device.randomized_mac:
-        message += " Địa chỉ MAC trông ngẫu nhiên, có thể là điện thoại đã đổi MAC ngẫu nhiên."
+        message += " MAC quản lý cục bộ/riêng tư; chưa đủ thông tin để xác định hãng hoặc loại thiết bị."
     return Alert(level="warning", message=message, device_mac=device.mac)
 
 

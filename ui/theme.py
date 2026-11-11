@@ -3,6 +3,7 @@
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import QApplication, QStyle, QStyledItemDelegate, QTableWidget
+from ui.device_columns import DeviceColumn as Col
 
 BACKGROUND = "#F4F6FA"
 TEXT = "#1E293B"
@@ -156,13 +157,11 @@ class LightTableDelegate(QStyledItemDelegate):
         text = str(index.data(Qt.DisplayRole) or "")
         tone = None
         if table.objectName() == "deviceTable":
-            if index.column() == 5:
+            if index.column() == Col.STATUS:
                 tone = "success" if text == "Online" else "offline" if text == "Offline" else "pending"
-            elif index.column() == 7:
-                tone = "pending" if text == "Có" else "success"
-            elif index.column() == 8 and text == "Có":
-                tone = "warning"
-            if index.column() == 6:
+            elif index.column() == Col.TYPE:
+                tone = "pending" if "(gợi ý)" in text else "success" if "(đã chọn)" in text else None
+            if index.column() == Col.TRUSTED:
                 box = QRectF(0, 0, 17, 17)
                 box.moveCenter(rect.center())
                 checked = index.data(Qt.CheckStateRole) == Qt.Checked.value
@@ -194,10 +193,10 @@ class LightTableDelegate(QStyledItemDelegate):
                              painter.fontMetrics().elidedText(text, Qt.ElideRight, max(0, int(width - 18))))
         else:
             color = MUTED if text in ("", "—", "Chưa xác định") else (
-                SECONDARY if (table.objectName() == "deviceTable" and index.column() in (1, 9)) else TEXT
+                SECONDARY if (table.objectName() == "deviceTable" and index.column() in (Col.MAC, Col.IP, Col.LAST_SEEN)) else TEXT
             )
             font = QFont(option.font)
-            if table.objectName() == "deviceTable" and index.column() == 1:
+            if table.objectName() == "deviceTable" and index.column() == Col.MAC:
                 font.setFamily("Consolas")
                 font.setPointSize(10)
             painter.setFont(font)
@@ -213,11 +212,11 @@ class LightTableDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         hint = super().sizeHint(option, index)
-        padding = 28 if index.column() == 5 else 24
+        padding = 28 if index.column() == Col.STATUS else 24
         return QSize(hint.width() + padding, max(46, hint.height()))
 
     def editorEvent(self, event, model, option, index):
-        if self.parent().objectName() == "deviceTable" and index.column() == 6:
+        if self.parent().objectName() == "deviceTable" and index.column() == Col.TRUSTED:
             if (event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton) or (
                 event.type() == QEvent.KeyPress and event.key() == Qt.Key_Space
             ):

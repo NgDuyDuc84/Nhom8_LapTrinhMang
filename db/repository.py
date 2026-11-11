@@ -9,6 +9,7 @@ Quy ước:
 from __future__ import annotations
 
 import ipaddress
+import json
 from datetime import datetime
 
 from db.database import transaction
@@ -29,7 +30,16 @@ __all__ = [
     "get_presence",
     "get_meta",
     "set_meta",
+    "save_identity",
+    "set_type_override",
 ]
+
+_DEVICE_SELECT = """
+    SELECT d.*, i.ip AS identity_ip, i.hostname, i.discovered_name,
+           i.manufacturer, i.model, i.services, i.device_type, i.confidence,
+           i.evidence, i.type_override, i.observed_at
+    FROM Devices d LEFT JOIN DeviceIdentity i ON i.mac = d.mac
+"""
 
 
 def _to_iso(moment: datetime) -> str:
@@ -44,6 +54,13 @@ def _from_iso(text: str) -> datetime:
 
 def _row_to_device(row) -> Device:
     """Chuyển một dòng bảng ``Devices`` thành ``Device``."""
+    same_ip = row["identity_ip"] == row["ip"]
+    try:
+        services = json.loads(row["services"] or "[]") if same_ip else []
+        if not isinstance(services, list):
+            services = []
+    except (TypeError, ValueError):
+        services = []
     return Device(
         ip=row["ip"],
         mac=row["mac"],
@@ -56,6 +73,16 @@ def _row_to_device(row) -> Device:
         is_self=bool(row["is_self"]),
         first_seen=_from_iso(row["first_seen"]),
         last_seen=_from_iso(row["last_seen"]),
+        hostname=(row["hostname"] or "") if same_ip else "",
+        discovered_name=(row["discovered_name"] or "") if same_ip else "",
+        manufacturer=(row["manufacturer"] or "") if same_ip else "",
+        model=(row["model"] or "") if same_ip else "",
+        services=tuple(str(item) for item in services[:32]),
+        device_type=(row["device_type"] or "unknown") if same_ip else "unknown",
+        identity_confidence=(row["confidence"] or "unknown") if same_ip else "unknown",
+        identity_evidence=(row["evidence"] or "") if same_ip else "",
+        type_override=row["type_override"] or "",
+        identity_seen=_from_iso(row["observed_at"]) if same_ip and row["observed_at"] else None,
     )
 
 
@@ -100,14 +127,14 @@ def upsert_device(device: Device) -> None:
 def get_device(mac: str) -> Device | None:
     """Lấy một thiết bị theo MAC; trả ``None`` nếu chưa có trong CSDL."""
     with transaction() as connection:
-        row = connection.execute("SELECT * FROM Devices WHERE mac = ?", (mac.lower(),)).fetchone()
+        row = connection.execute(_DEVICE_SELECT + " WHERE d.mac = ?", (mac.lower(),)).fetchone()
     return _row_to_device(row) if row else None
 
 
 def list_devices() -> list[Device]:
     """Trả về toàn bộ thiết bị, sắp xếp theo địa chỉ IP tăng dần."""
     with transaction() as connection:
-        rows = connection.execute("SELECT * FROM Devices").fetchall()
+        rows = connection.execute(_DEVICE_SELECT).fetchall()
     devices = [_row_to_device(row) for row in rows]
     return sorted(devices, key=lambda device: ipaddress.IPv4Address(device.ip))
 
@@ -123,6 +150,45 @@ def set_name_note(mac: str, name: str, note: str) -> None:
     with transaction() as connection:
         connection.execute(
             "UPDATE Devices SET name = ?, note = ? WHERE mac = ?", (name, note, mac.lower())
+        )
+
+
+def save_identity(device: Device) -> bool:
+    """Lưu nhận diện tự động nếu MAC vẫn ở đúng IP; giữ lựa chọn thủ công."""
+    with transaction() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO DeviceIdentity
+                (mac, ip, hostname, discovered_name, manufacturer, model, services,
+                 device_type, confidence, evidence, observed_at)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            FROM Devices WHERE mac = ? AND ip = ?
+            ON CONFLICT(mac) DO UPDATE SET
+                ip=excluded.ip, hostname=excluded.hostname,
+                discovered_name=excluded.discovered_name, manufacturer=excluded.manufacturer,
+                model=excluded.model, services=excluded.services, device_type=excluded.device_type,
+                confidence=excluded.confidence, evidence=excluded.evidence,
+                observed_at=excluded.observed_at
+            WHERE DeviceIdentity.ip <> excluded.ip OR DeviceIdentity.observed_at IS NULL
+               OR (excluded.observed_at IS NOT NULL AND excluded.observed_at >= DeviceIdentity.observed_at)
+            """,
+            (device.mac.lower(), device.ip, device.hostname, device.discovered_name,
+             device.manufacturer, device.model, json.dumps(list(device.services), ensure_ascii=False),
+             device.device_type, device.identity_confidence, device.identity_evidence,
+             device.identity_seen.isoformat(timespec="microseconds") if device.identity_seen else None,
+             device.mac.lower(), device.ip),
+        )
+    return cursor.rowcount > 0
+
+
+def set_type_override(mac: str, device_type: str) -> None:
+    """Lưu loại do người dùng xác nhận, độc lập với kết quả tự phát hiện."""
+    with transaction() as connection:
+        connection.execute(
+            "INSERT INTO DeviceIdentity (mac, ip, type_override) "
+            "SELECT mac, ip, ? FROM Devices WHERE mac = ? "
+            "ON CONFLICT(mac) DO UPDATE SET type_override=excluded.type_override",
+            (device_type, mac.lower()),
         )
 
 

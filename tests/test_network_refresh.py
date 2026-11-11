@@ -421,6 +421,7 @@ def test_backend_start_wires_refresh_to_real_service_workers(monkeypatch, ui, if
     monkeypatch.setattr("services.ping_monitor.ping_once", lambda *a, **k: 3.5)
     monkeypatch.setattr("services.ping_monitor.trace", lambda *a, **k: [])
     monkeypatch.setattr("core.arp_listener.ArpListener", listener_factory)
+    monkeypatch.setattr("services.device_identification.discover_device_hints", lambda *a: {})
 
     backend.start()
     wait_for(lambda: scanner.call_count >= 1 and bool(backend.get_latest_measurements()), app)

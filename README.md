@@ -287,7 +287,7 @@ có thể không hiển thị rõ.
 
 | Phần giao diện | Chức năng đã nối | Giới hạn hiện tại |
 |---|---|---|
-| Thiết bị | IP/MAC từ ARP, tên/ghi chú đã lưu, Online/Offline hoặc chưa xác minh; tin cậy, chưa tin cậy, MAC cục bộ và thời điểm thấy gần nhất | MAC cục bộ được tính từ bit của địa chỉ thật, không đồng nghĩa với thiết bị lạ |
+| Thiết bị | Tên dễ đọc, loại gợi ý, hãng/card mạng, Online/Offline hoặc chưa xác minh, tin cậy, ghi chú; xem MAC/IP và nguồn nhận diện trong Chi tiết | Loại gợi ý chưa phải xác minh phần cứng; có thể xác nhận loại thủ công |
 | Cảnh báo | Danh sách 20 cảnh báo gần nhất, màu mức độ và thông báo qua khay hệ thống | Chưa có bộ lọc, tìm kiếm hoặc gửi Zalo trên UI |
 | Chẩn đoán | Nhận đúng kết luận từ backend; bảng địa chỉ đích, RTT mới nhất, mất gói của 30 mẫu lịch sử và lỗi đo; đồ thị RTT lịch sử 30 phút | Không tự kết luận `ok` từ bản ghi cũ hoặc khi chưa đủ mẫu; chưa có biểu đồ mất gói riêng |
 | Báo cáo | Chọn khoảng thời gian và đường dẫn lưu PDF, gọi `extras/pdf_report.py` | Cần cài đủ thư viện xuất báo cáo, gồm ReportLab và Matplotlib |
@@ -302,8 +302,9 @@ online/offline từng thiết bị, xuất CSV, quét kênh Wi-Fi và demo Zalo.
 .\.venv\Scripts\python.exe main.py --cli baseline
 ```
 
-Hãng được tra từ `data/oui.csv`; MAC chưa có trong danh sách sẽ hiện **Chưa xác
-định**. Tên/ghi chú do người dùng đặt và lịch sử đã lưu vẫn được giữ nguyên.
+Hãng card mạng được tra ngoại tuyến bằng dữ liệu đóng gói trong Scapy cùng các mục
+bổ sung ở `data/oui.csv`. MAC riêng tư/cục bộ không được gán hãng từ tiền tố.
+Tên/ghi chú do người dùng đặt và lịch sử đã lưu vẫn được giữ nguyên.
 
 ### 5.5. Làm mới mạng ngay trên giao diện
 
@@ -325,7 +326,27 @@ Có thể dùng sau khi đổi Wi-Fi, chuyển Wi-Fi/Ethernet hoặc khi muốn 
 Giới hạn subnet lớn hiện vẫn áp dụng: mạng vượt 1.024 host sẽ báo lỗi quét trên dòng
 làm mới. Việc mở rộng phạm vi quét và tách lịch sử theo mạng là các phần sửa tiếp theo.
 
+### 5.6. Nhận diện thiết bị bằng hãng, tên và dịch vụ
+
+Bảng thiết bị hiển thị tên dễ hiểu và loại thiết bị thay cho việc lấy IP làm tên.
+**Máy tính này** là máy đang chạy NetGuard; router/gateway được nhận diện theo kết nối.
+
+- Tra hãng/card mạng ngoại tuyến từ hơn 50.000 prefix MAC trong môi trường hiện tại.
+  Hãng linh kiện như Intel có thể khác hãng sản xuất cả chiếc máy.
+- Thu thập bổ sung tên/model/dịch vụ công bố trong LAN qua mDNS/DNS-SD và NetBIOS ở nền.
+  Tên/loại có thể cập nhật thêm sau khi lượt quét hoàn tất.
+- Các loại suy luận có chữ **gợi ý**. MAC riêng tư/cục bộ hoặc thiếu phản hồi có thể
+  vẫn hiện **Chưa xác định**; không tự kết luận điện thoại/laptop chỉ dựa vào tên hãng.
+- Chọn thiết bị, bấm **Chi tiết / Sửa tên** để xem nguồn nhận diện, model, MAC/IP,
+  đặt tên gợi nhớ và **Xác nhận loại thiết bị**. Chọn **Tự nhận diện** để bỏ loại thủ công.
+- Bật **Hiện MAC / IP** khi cần hiện địa chỉ trong bảng. Tên, ghi chú, tin cậy và
+  loại đã xác nhận được giữ sau khi làm mới hoặc mở lại ứng dụng.
+
+Ứng dụng chỉ hỏi trong LAN, không gửi MAC tới dịch vụ tra cứu trên Internet.
+Xem [phương pháp, giới hạn và cách kiểm tra nhận diện](docs/device-identification.md).
+
 ## 6. Lỗi thường gặp
+
 
 | Triệu chứng | Nguyên nhân | Cách xử lý |
 |---|---|---|

@@ -2,8 +2,7 @@
 
 Mỗi chu kỳ ``SCAN_INTERVAL_SEC`` giây:
 1. Quét ARP subnet của card đang dùng.
-2. Tra hãng (``extras.oui``) và nhận diện MAC ngẫu nhiên (``extras.mac_random``),
-   tạm dùng ``"Unknown"`` / ``False`` khi C chưa làm xong hai module đó.
+2. Tra hãng ngoại tuyến và nhận diện vai trò; hẹn bổ sung tên/dịch vụ ở nền.
 3. Cập nhật CSDL, đánh dấu online; thiết bị vắng mặt ``OFFLINE_AFTER_MISSES``
    lần liên tiếp mới bị coi là offline.
 4. Phát sự kiện ra ngoài bằng callback: ``on_device(device, event)`` với ``event``
@@ -24,7 +23,8 @@ from config import OFFLINE_AFTER_MISSES, SCAN_INTERVAL_SEC
 from core.arp_scanner import ScanEntry, scan_subnet
 from core.interfaces import NetInterface, get_active_interface
 from db import repository
-from extras import mac_random, oui
+from extras import mac_random
+from extras.device_identity import identify_device
 from models import Alert, Device, now
 from services import alerts as alerts_service
 from services import baseline
@@ -41,14 +41,6 @@ def _log(message: str) -> None:
         print(message, file=sys.stderr)
     except (UnicodeEncodeError, OSError):
         pass
-
-
-def _lookup_vendor(mac: str) -> str:
-    """Tra hãng sản xuất; ``extras.oui`` chưa xong thì tạm trả ``"Unknown"``."""
-    try:
-        return oui.lookup(mac) or "Unknown"
-    except NotImplementedError:
-        return "Unknown"
 
 
 def _is_randomized(mac: str) -> bool:
@@ -73,6 +65,7 @@ class ScanLoop:
         on_interface: Callable[[NetInterface | None], None] | None = None,
         on_scan: Callable[[list[ScanEntry]], None] | None = None,
         on_refresh: Callable[[NetInterface | None, list[ScanEntry] | None, str | None], None] | None = None,
+        on_identify: Callable[[NetInterface, list[ScanEntry], bool], None] | None = None,
     ) -> None:
         self._on_device = on_device or (lambda device, event: None)
         self._on_alert = on_alert or (lambda alert: None)
@@ -83,6 +76,7 @@ class ScanLoop:
         self._on_interface = on_interface or (lambda chosen: None)
         self._on_scan = on_scan or (lambda entries: None)
         self._on_refresh = on_refresh or (lambda iface, entries, error: None)
+        self._on_identify = on_identify or (lambda iface, entries, force: None)
         self._network_key: tuple | None = None
         self._scanner = scanner or (lambda chosen: scan_subnet(chosen))
         self._misses: dict[str, int] = {}
@@ -176,16 +170,16 @@ class ScanLoop:
             device = existing or Device(ip=entry.ip, mac=mac, first_seen=moment, last_seen=moment)
             device.ip = entry.ip
             device.mac = mac
-            if not device.vendor or device.vendor == "Unknown":
-                device.vendor = _lookup_vendor(mac)
             if not device.randomized_mac:
                 device.randomized_mac = _is_randomized(mac)
             device.is_self = entry.is_self
             device.last_seen = moment
+            device = identify_device(device, iface.gateway)
 
             # Không tự đặt device.online = True ở đây: để set_online() phát hiện
             # thay đổi và ghi PresenceLog (upsert sẽ ghi đè cờ online trước khi nó chạy).
             repository.upsert_device(device)
+            repository.save_identity(device)
             repository.set_online(mac, True, ts=moment)
             self._misses[mac] = 0
             seen.add(mac)
@@ -206,6 +200,10 @@ class ScanLoop:
 
         self._mark_offline(seen, moment)
         self._on_scan(entries)
+        try:
+            self._on_identify(iface, entries, reselect)
+        except Exception as exc:
+            _log(f"[yêu cầu nhận diện] {exc}")
         return entries
 
     def _update_interface(self, iface: NetInterface | None, *, force: bool = False) -> None:

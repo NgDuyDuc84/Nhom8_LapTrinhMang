@@ -19,6 +19,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QCheckBox,
+    QComboBox,
     QDateTimeEdit,
     QDialog,
     QFileDialog,
@@ -42,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.tray import NetGuardTrayIcon
+from ui.device_columns import DeviceColumn as Col
 from ui.theme import ATTENTION_ROLE, BADGES, LightTable, apply_light_theme, badge_stylesheet
 
 try:
@@ -51,7 +54,7 @@ except Exception:  # pragma: no cover - fallback nếu môi trường thiếu py
 
 from backend import BackendBase
 from models import Alert, Device, Diagnosis
-from extras.mac_random import is_randomized
+from extras.device_identity import DEVICE_TYPES, device_title, manufacturer_label, type_label
 
 
 class DeviceDialog(QDialog):
@@ -60,17 +63,48 @@ class DeviceDialog(QDialog):
     def __init__(self, device: Device, parent=None):
         super().__init__(parent)
         self.device = device
-        self.setWindowTitle(f"Thiết bị {device.ip}")
-        self.resize(420, 220)
+        self.setWindowTitle("Chi tiết và nhận diện thiết bị")
+        self.resize(640, 520)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
         self.name_edit = QLineEdit(device.name or "")
+        self.name_edit.setPlaceholderText(device_title(device))
         self.note_edit = QLineEdit(device.note or "")
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("Tự nhận diện", "")
+        for kind, label in DEVICE_TYPES.items():
+            if kind != "unknown":
+                self.type_combo.addItem(label, kind)
+        self.type_combo.setCurrentIndex(max(0, self.type_combo.findData(device.type_override)))
         form.addRow("Tên gợi nhớ:", self.name_edit)
         form.addRow("Ghi chú:", self.note_edit)
+        form.addRow("Xác nhận loại thiết bị:", self.type_combo)
+        for label, value in (
+            ("Tên phát hiện:", device.discovered_name or device.hostname or "Chưa có"),
+            ("Địa chỉ MAC:", device.mac), ("Địa chỉ IP:", device.ip),
+            ("Hãng / linh kiện mạng:", manufacturer_label(device)),
+            ("Hãng đăng ký MAC:", device.vendor if device.vendor != "Unknown" else "Chưa xác định"),
+            ("Model tự công bố:", device.model or "Chưa có"),
+            ("Loại tự nhận diện:", type_label(device, automatic=True)),
+            ("Thông tin LAN cập nhật:", device.identity_seen.strftime("%d/%m/%Y %H:%M:%S")
+             if device.identity_seen else "Chưa có phản hồi tên/dịch vụ"),
+        ):
+            text = QLabel(value)
+            text.setTextFormat(Qt.PlainText)
+            text.setWordWrap(True)
+            text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            form.addRow(label, text)
         layout.addLayout(form)
+        evidence = QLabel(device.identity_evidence or "Chưa đủ thông tin nhận diện. Bấm Làm mới mạng để thử lại.")
+        evidence.setTextFormat(Qt.PlainText)
+        evidence.setWordWrap(True)
+        evidence.setStyleSheet("color: #64748B; padding: 8px 0;")
+        layout.addWidget(evidence)
+        explanation = QLabel("Thông tin tự công bố chỉ là gợi ý. Bạn có thể xác nhận loại thiết bị ở trên.")
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
 
         buttons = QHBoxLayout()
         save_btn = QPushButton("Lưu")
@@ -85,6 +119,9 @@ class DeviceDialog(QDialog):
 
     def values(self):
         return self.name_edit.text(), self.note_edit.text()
+
+    def type_override(self) -> str:
+        return self.type_combo.currentData()
 
 
 class MainWindow(QMainWindow):
@@ -126,7 +163,7 @@ class MainWindow(QMainWindow):
         self.trust_all_action.clicked.connect(self.trust_all_devices)
         self.toolbar.addWidget(self.trust_all_action)
 
-        self.rename_action = QPushButton("Sửa tên")
+        self.rename_action = QPushButton("Chi tiết / Sửa tên")
         self.rename_action.clicked.connect(self.rename_selected_device)
         self.toolbar.addWidget(self.rename_action)
 
@@ -274,19 +311,33 @@ class MainWindow(QMainWindow):
     def _init_devices_tab(self) -> None:
         layout = QVBoxLayout(self.devices_tab)
         layout.setContentsMargins(0, 12, 0, 0)
+        options = QHBoxLayout()
+        hint = QLabel("Loại có chữ “gợi ý” chưa được xác nhận. Chọn thiết bị để xem Chi tiết / Sửa tên.")
+        hint.setObjectName("subtitle")
+        hint.setWordWrap(True)
+        options.addWidget(hint, 1)
+        self.show_network_details = QCheckBox("Hiện MAC / IP")
+        self.show_network_details.toggled.connect(self._toggle_network_columns)
+        options.addWidget(self.show_network_details)
+        layout.addLayout(options)
         self.device_table = LightTable()
         self.device_table.setObjectName("deviceTable")
-        self.device_table.setColumnCount(10)
+        self.device_table.setColumnCount(len(Col))
         self.device_table.setHorizontalHeaderLabels([
-            "IP", "MAC", "HÃNG", "TÊN", "GHI CHÚ", "TRẠNG THÁI", "TIN CẬY",
-            "CHƯA TIN CẬY", "MAC CỤC BỘ", "THẤY GẦN NHẤT",
+            "THIẾT BỊ", "LOẠI THIẾT BỊ", "NHÀ SẢN XUẤT", "TRẠNG THÁI", "TIN CẬY",
+            "THẤY GẦN NHẤT", "GHI CHÚ", "ĐỊA CHỈ MAC", "ĐỊA CHỈ IP",
         ])
         self.device_table.setAlternatingRowColors(True)
         self.device_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.device_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.device_table.cellChanged.connect(self._handle_device_cell_edit)
         self.device_table.itemChanged.connect(self._handle_device_item_changed)
+        self._toggle_network_columns(False)
         layout.addWidget(self.device_table)
+
+    def _toggle_network_columns(self, visible: bool) -> None:
+        for column in (Col.MAC, Col.IP):
+            self.device_table.setColumnHidden(column, not visible)
 
     def _init_alerts_tab(self) -> None:
         layout = QVBoxLayout(self.alerts_tab)
@@ -382,36 +433,38 @@ class MainWindow(QMainWindow):
             self._device_rows[device.mac] = row_index
 
             values = [
-                device.ip,
-                device.mac,
-                device.vendor if device.vendor and device.vendor != "Unknown" else "Chưa xác định",
-                device.name or "",
-                device.note or "",
+                device_title(device),
+                type_label(device),
+                manufacturer_label(device),
                 self.backend.get_device_status(device),
                 "" if device.trusted else "",
-                "Không" if device.trusted else "Có",
-                "Có" if is_randomized(device.mac) else "Không",
                 device.last_seen.strftime("%d/%m %H:%M:%S"),
+                device.note or "",
+                device.mac,
+                device.ip,
             ]
 
             for col_index, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setToolTip(str(value))
-                if col_index not in (3, 4, 6):
+                if col_index not in (Col.NAME, Col.NOTE, Col.TRUSTED):
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                if col_index == 0 and (not device.trusted or is_randomized(device.mac)):
+                if col_index == Col.NAME and not device.trusted:
                     item.setData(ATTENTION_ROLE, "warning")
-                if col_index == 6:
+                if col_index == Col.TRUSTED:
                     item = QTableWidgetItem()
                     item.setCheckState(Qt.Checked if device.trusted else Qt.Unchecked)
                     item.setFlags((item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-                if col_index == 8:
-                    item.setToolTip("Bit quản lý cục bộ của MAC; không đủ để kết luận thiết bị lạ hoặc MAC ngẫu nhiên.")
+                if col_index in (Col.TYPE, Col.MANUFACTURER):
+                    item.setToolTip(device.identity_evidence or "Chưa đủ bằng chứng để nhận diện loại thiết bị.")
+                if col_index == Col.NAME:
+                    item.setToolTip(f"{value}\nMAC: {device.mac}\nIP: {device.ip}")
                 self.device_table.setItem(row_index, col_index, item)
 
         self.device_table.resizeColumnsToContents()
-        self.device_table.setColumnWidth(1, max(176, self.device_table.columnWidth(1)))
-        self.device_table.setColumnWidth(5, max(230, self.device_table.columnWidth(5)))
+        for column, width in ((Col.NAME, 220), (Col.TYPE, 210), (Col.MANUFACTURER, 205),
+                              (Col.STATUS, 200), (Col.LAST_SEEN, 150), (Col.NOTE, 120), (Col.MAC, 176)):
+            self.device_table.setColumnWidth(column, width)
         self.device_table.horizontalHeader().setStretchLastSection(True)
         self._refreshing = False
 
@@ -534,11 +587,8 @@ class MainWindow(QMainWindow):
     def _handle_device_item_changed(self, item):
         if self._refreshing or item is None:
             return
-        if item.column() != 6:
+        if item.column() != Col.TRUSTED:
             return
-        for device in self.backend.list_devices():
-            if self.device_table.item(self._device_rows.get(device.mac, -1), 0) is item:
-                break
         checked = item.checkState() == Qt.Checked
         row_index = self.device_table.row(item)
         mac = None
@@ -552,7 +602,7 @@ class MainWindow(QMainWindow):
     def _handle_device_cell_edit(self, row, col):
         if self._refreshing:
             return
-        if col not in (3, 4):
+        if col not in (Col.NAME, Col.NOTE):
             return
         item = self.device_table.item(row, col)
         if item is None:
@@ -560,8 +610,8 @@ class MainWindow(QMainWindow):
         device = self._row_to_device(row)
         if device is None:
             return
-        name = self.device_table.item(row, 3).text().strip() if self.device_table.item(row, 3) else ""
-        note = self.device_table.item(row, 4).text().strip() if self.device_table.item(row, 4) else ""
+        name = self.device_table.item(row, Col.NAME).text().strip() if col == Col.NAME else device.name
+        note = self.device_table.item(row, Col.NOTE).text().strip() if self.device_table.item(row, Col.NOTE) else ""
         self.backend.rename(device.mac, name, note)
 
     def _row_to_device(self, row_index: int) -> Device | None:
@@ -595,7 +645,11 @@ class MainWindow(QMainWindow):
         dialog = DeviceDialog(device, self)
         if dialog.exec() == QDialog.Accepted:
             name, note = dialog.values()
-            self.backend.rename(device.mac, name, note)
+            try:
+                self.backend.rename(device.mac, name, note)
+                self.backend.set_device_type(device.mac, dialog.type_override())
+            except Exception as exc:
+                QMessageBox.critical(self, "Không lưu được thiết bị", str(exc))
 
     def export_report(self) -> None:
         start = self.start_time.dateTime().toPython()

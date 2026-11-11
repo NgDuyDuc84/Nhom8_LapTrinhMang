@@ -36,6 +36,28 @@ class Device:
     is_self: bool = False
     first_seen: datetime = field(default_factory=now)
     last_seen: datetime = field(default_factory=now)
+    hostname: str = ""
+    discovered_name: str = ""
+    manufacturer: str = ""
+    model: str = ""
+    services: tuple[str, ...] = ()
+    device_type: str = "unknown"
+    identity_confidence: str = "unknown"
+    identity_evidence: str = ""
+    type_override: str = ""
+    identity_seen: datetime | None = None
+
+
+@dataclass
+class DeviceHints:
+    """Thông tin thiết bị tự công bố trong LAN; không phải dữ liệu xác thực."""
+
+    hostname: str = ""
+    name: str = ""
+    manufacturer: str = ""
+    model: str = ""
+    services: set[str] = field(default_factory=set)
+    sources: set[str] = field(default_factory=set)
 
 
 @dataclass

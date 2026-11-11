@@ -9,6 +9,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
+from ui.device_columns import DeviceColumn as Col
 
 
 @pytest.fixture(scope='module')
@@ -76,18 +77,18 @@ def test_real_scan_updates_ui_and_marks_cached_devices_unverified(real_ui):
     repository.upsert_device(Device('192.168.1.1', '00:11:22:33:44:66', online=True))
     backend._emit_connection(iface)
     window.refresh_devices()
-    assert window.device_table.item(0, 5).text() == 'Chưa xác minh trong phiên'
+    assert window.device_table.item(0, Col.STATUS).text() == 'Chưa xác minh trong phiên'
     entry = ScanEntry(iface.ip, iface.mac, True)
     loop = ScanLoop(interface_resolver=lambda: iface, scanner=lambda chosen: [entry],
                     on_device=backend._emit_device, on_scan=backend._emit_scan)
     loop.scan_once()
     row = window._device_rows[iface.mac]
-    assert window.device_table.item(row, 0).text() == iface.ip
-    assert window.device_table.item(row, 5).text() == 'Online'
-    assert window.device_table.item(row, 7).text() == 'Có'  # chưa tin cậy
-    assert window.device_table.item(row, 8).text() == 'Có'  # MAC quản lý cục bộ
+    assert window.device_table.item(row, Col.NAME).text() == 'Máy tính này'
+    assert window.device_table.item(row, Col.IP).text() == iface.ip
+    assert window.device_table.item(row, Col.STATUS).text() == 'Online'
+    assert 'MAC riêng tư' in window.device_table.item(row, Col.MANUFACTURER).text()
     backend._emit_connection(None)
-    assert window.device_table.item(row, 5).text() == 'Chưa xác minh (mất LAN)'
+    assert window.device_table.item(row, Col.STATUS).text() == 'Chưa xác minh (mất LAN)'
 
 
 def test_real_ping_cycle_and_socket_error_reach_ui(real_ui):
@@ -157,10 +158,10 @@ def test_themed_checkbox_still_saves_trust_by_mouse_and_keyboard(real_ui, qt_app
     window.show()
     qt_app.processEvents()
     table = window.device_table
-    checkbox = table.visualItemRect(table.item(0, 6)).center()
+    checkbox = table.visualItemRect(table.item(0, Col.TRUSTED)).center()
     QTest.mouseClick(table.viewport(), Qt.LeftButton, Qt.NoModifier, checkbox)
     assert repository.get_device(device.mac).trusted
-    table.setCurrentCell(0, 6)
+    table.setCurrentCell(0, Col.TRUSTED)
     QTest.keyClick(table, Qt.Key_Space)
     assert not repository.get_device(device.mac).trusted
     window.hide()

@@ -40,6 +40,21 @@ CREATE TABLE IF NOT EXISTS PresenceLog (
 );
 CREATE INDEX IF NOT EXISTS idx_presence_mac_ts ON PresenceLog(mac, ts);
 
+CREATE TABLE IF NOT EXISTS DeviceIdentity (
+    mac                 TEXT PRIMARY KEY,
+    ip                  TEXT NOT NULL DEFAULT '',
+    hostname            TEXT NOT NULL DEFAULT '',
+    discovered_name     TEXT NOT NULL DEFAULT '',
+    manufacturer        TEXT NOT NULL DEFAULT '',
+    model               TEXT NOT NULL DEFAULT '',
+    services            TEXT NOT NULL DEFAULT '[]',
+    device_type         TEXT NOT NULL DEFAULT 'unknown',
+    confidence          TEXT NOT NULL DEFAULT 'unknown',
+    evidence            TEXT NOT NULL DEFAULT '',
+    type_override       TEXT NOT NULL DEFAULT '',
+    observed_at         TEXT
+);
+
 CREATE TABLE IF NOT EXISTS PingLog (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     target   TEXT NOT NULL,

@@ -30,7 +30,7 @@ class BackendBase(QObject):
     traceroute_done = Signal(object)     # list[Hop]: traceroute chạy xong
     connection_changed = Signal(object)  # dict: card, IP, gateway hiện tại
     measurement_changed = Signal(object) # dict: kết quả và lỗi đo từng chu kỳ
-    devices_refreshed = Signal()         # một lượt quét thật đã hoàn tất
+    devices_refreshed = Signal()         # bảng thiết bị có dữ liệu mới
     network_refresh_changed = Signal(object)  # dict: tiến độ/kết quả làm mới theo yêu cầu
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -77,6 +77,10 @@ class BackendBase(QObject):
         """Đổi tên gợi nhớ và ghi chú của thiết bị."""
         raise NotImplementedError
 
+    def set_device_type(self, mac: str, device_type: str) -> None:
+        """Xác nhận loại thủ công; chuỗi rỗng trở lại nhận diện tự động."""
+        raise NotImplementedError
+
     # --- Đường cơ sở (baseline) ---
     def is_first_run(self) -> bool:
         """True nếu chưa hoàn tất lập đường cơ sở (lần chạy đầu tiên)."""
@@ -121,6 +125,7 @@ class Backend(BackendBase):
         self._ping_monitor = None
         self._arp_listener = None
         self._arp_detector = None
+        self._identifier = None
         self._traceroute_thread: threading.Thread | None = None
         self._traceroute_lock = threading.Lock()
         self._traceroute_stop = threading.Event()
@@ -145,6 +150,7 @@ class Backend(BackendBase):
         from core.interfaces import get_active_interface
         from services.ping_monitor import PingMonitor
         from services.scan_loop import ScanLoop
+        from services.device_identification import DeviceIdentification
 
         if self._loop is not None:
             return
@@ -157,6 +163,7 @@ class Backend(BackendBase):
             database.close()
             raise
         self._emit_connection(iface)
+        self._identifier = DeviceIdentification(on_complete=self.devices_refreshed.emit)
         self._loop = ScanLoop(
             on_device=self._emit_device,
             on_alert=self._emit_alert,
@@ -164,6 +171,7 @@ class Backend(BackendBase):
             on_interface=self._refresh_arp_interface,
             on_scan=self._emit_scan,
             on_refresh=self._on_scan_refresh,
+            on_identify=self._identifier.request,
         )
         self._ping_monitor = PingMonitor(
             on_ping=self.ping_result.emit,
@@ -176,6 +184,7 @@ class Backend(BackendBase):
         try:
             for device in repository.list_devices():
                 self.device_updated.emit(device)
+            self._identifier.start()
             self._loop.start()
             self._ping_monitor.start()
         except Exception:
@@ -200,6 +209,9 @@ class Backend(BackendBase):
         if self._ping_monitor is not None:
             self._ping_monitor.stop()
             self._ping_monitor = None
+        if self._identifier is not None:
+            self._identifier.stop()
+            self._identifier = None
         trace_thread = self._traceroute_thread
         if trace_thread is not None and trace_thread.is_alive():
             self._traceroute_stop.set()
@@ -400,6 +412,16 @@ class Backend(BackendBase):
 
     def rename(self, mac: str, name: str, note: str) -> None:
         repository.set_name_note(mac, name, note)
+        device = repository.get_device(mac)
+        if device is not None:
+            self.device_updated.emit(device)
+
+    def set_device_type(self, mac: str, device_type: str) -> None:
+        from extras.device_identity import DEVICE_TYPES
+
+        if device_type and device_type not in DEVICE_TYPES:
+            raise ValueError("Loại thiết bị không hợp lệ.")
+        repository.set_type_override(mac, device_type)
         device = repository.get_device(mac)
         if device is not None:
             self.device_updated.emit(device)
