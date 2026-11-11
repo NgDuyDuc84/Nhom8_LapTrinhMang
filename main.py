@@ -1,17 +1,3 @@
-"""Điểm vào của NetGuard.
-
-Cách dùng (chạy từ gốc repo, terminal Administrator khi cần gói tin thô):
-
-    python main.py                 # mở giao diện, dữ liệu thật (giai đoạn 8)
-    python main.py --cli scan      # quét ARP, in bảng IP/MAC (giai đoạn 3)
-    python main.py --cli monitor    # theo dõi thiết bị, in cảnh báo (giai đoạn 5)
-    python main.py --cli trace 1.1.1.1   # traceroute (giai đoạn 6)
-    python main.py --cli diagnose   # ping ba mốc và in kết luận (giai đoạn 7)
-
-Các chế độ CLI được triển khai trong core/services; GUI dùng BackendBase khi
-ui.main_window của B đã có.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -21,6 +7,7 @@ import time
 
 from core.console import setup_console_encoding
 from core.interfaces import check_environment, get_active_interface, get_warnings
+from core.startup import RELAUNCH_ARGUMENT, prepare_gui_launch, show_startup_error
 
 CLI_COMMANDS = ("scan", "baseline", "monitor", "trace", "diagnose")
 
@@ -47,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help="địa chỉ đích cho chế độ trace (mặc định: 1.1.1.1)",
     )
+    parser.add_argument(RELAUNCH_ARGUMENT, action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
@@ -344,7 +332,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cli:
         return run_cli(args.command, args.target)
-    return run_gui()
+    try:
+        if not prepare_gui_launch(relaunched=args.gui_relaunched):
+            return 0
+        return run_gui()
+    except Exception as exc:
+        show_startup_error(exc)
+        return 1
 
 
 if __name__ == "__main__":

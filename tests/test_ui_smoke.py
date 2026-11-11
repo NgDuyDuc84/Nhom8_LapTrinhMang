@@ -116,6 +116,7 @@ def test_real_ping_cycle_and_socket_error_reach_ui(real_ui):
 def test_default_main_uses_real_gui(monkeypatch):
     import main
 
+    monkeypatch.setattr(main, 'prepare_gui_launch', Mock(return_value=True))
     run_gui = Mock(return_value=0)
     monkeypatch.setattr(main, 'run_gui', run_gui)
     assert main.main([]) == 0

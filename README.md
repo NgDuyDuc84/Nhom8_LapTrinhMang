@@ -4,7 +4,9 @@
 
 Ứng dụng desktop bằng **Python** để giám sát mạng LAN: quét thiết bị bằng ARP, cảnh báo thiết bị lạ, chẩn đoán mạng chậm bằng ICMP, xuất báo cáo PDF.
 
-> Lưu ý: ứng dụng gửi và nhận gói tin thô nên **bắt buộc có Npcap và phải chạy bằng quyền Administrator**.
+> Mở hằng ngày: nhấp đúp **`Mo_NetGuard.cmd`**, bấm **Yes** khi Windows hỏi cấp quyền.
+> Không cần mở PowerShell bằng Administrator hoặc kích hoạt `.venv` mỗi lần.
+> Ứng dụng tự xin quyền cần thiết; vẫn cần cài Npcap và các thư viện ở lần cài đặt đầu tiên.
 
 ## 1. Yêu cầu hệ thống
 
@@ -101,7 +103,15 @@ python -c "from icmplib import ping; r=ping('1.1.1.1', count=4); print(r.avg_rtt
 
 ## 5. Chạy ứng dụng
 
-Mở PowerShell bằng quyền Administrator cho các chế độ gửi/nhận gói mạng thô. Kích hoạt venv:
+Để mở giao diện, nhấp đúp **`Mo_NetGuard.cmd`** trong thư mục dự án, rồi bấm **Yes**
+ở hộp thoại cấp quyền Windows. Launcher tự chọn Python trong `.venv`; không phải gõ lệnh.
+Chọn **No** sẽ hủy mở ứng dụng, không hỏi quyền lặp lại.
+
+Nếu dùng terminal thường, `python main.py` cũng tự chọn môi trường `.venv` của dự án
+và xin quyền khi cần. Không cần mở lại terminal bằng Administrator cho chế độ GUI.
+
+Các lệnh **CLI** bên dưới vẫn cần terminal Administrator khi gửi/nhận gói mạng thô.
+Kích hoạt venv:
 
 ```powershell
 .venv\Scripts\Activate.ps1
@@ -233,18 +243,25 @@ python -m pytest -q
 
 Các bài test tự động không thay thế bước kiểm tra tắt/bật card thật ở mục 5.1.
 
-### 5.4. Mở giao diện của HuyTien
+### 5.4. Mở giao diện NetGuard
 
-Nhấp đúp `Mo_NetGuard.cmd` rồi chấp nhận hộp thoại quyền Administrator của Windows
-để mở. File này chạy `main.py` và kết nối các dịch vụ giám sát mạng.
+Nhấp đúp **`Mo_NetGuard.cmd`** rồi chọn **Yes** ở hộp thoại cấp quyền của Windows.
+Không cần chuột phải “Run as administrator”, mở PowerShell hay kích hoạt môi trường.
+Ứng dụng tự xin quyền một lần cho mỗi lần mở; nếu đã có quyền thì mở thẳng giao diện.
+File chạy được cả khi thư mục dự án có dấu cách hoặc chữ tiếng Việt.
 
-Hoặc mở PowerShell bằng **Run as administrator** và chạy:
+Hoặc dùng PowerShell/terminal **thường** và chạy:
 
 ```powershell
 cd D:\Nhom8_LapTrinhMang
 
 .\.venv\Scripts\python.exe main.py
 ```
+
+Khi mở GUI từ một thư mục khác, ứng dụng vẫn dùng dữ liệu của thư mục dự án.
+Nếu khởi động lỗi trước khi nạp được giao diện, chương trình hiện hộp thoại và lưu
+chi tiết vào `logs/startup.log` để dễ kiểm tra. Nếu báo thiếu `.venv`, xem lại bước
+cài đặt ở mục 3. Windows vẫn cần bạn chấp thuận UAC vì chức năng mạng sử dụng quyền cao.
 
 UI hiển thị card mạng, IPv4/mặt nạ và gateway. Thiết bị lấy
 từ quét ARP; các mẫu RTT/mất gói và kết luận lấy từ dịch vụ ICMP. Không tự sinh

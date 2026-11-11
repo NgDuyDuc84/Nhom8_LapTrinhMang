@@ -6,5 +6,9 @@ if not exist "%NETGUARD_APP_ROOT%.venv\Scripts\pythonw.exe" (
     pause
     exit /b 1
 )
-powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; try { Start-Process -FilePath (Join-Path $env:NETGUARD_APP_ROOT '.venv\Scripts\pythonw.exe') -ArgumentList @('main.py') -WorkingDirectory $env:NETGUARD_APP_ROOT -Verb RunAs } catch { Write-Host $_.Exception.Message; exit 1 }"
-if errorlevel 1 pause
+start "" /d "%NETGUARD_APP_ROOT%" "%NETGUARD_APP_ROOT%.venv\Scripts\pythonw.exe" "%NETGUARD_APP_ROOT%main.py"
+if errorlevel 1 (
+    echo Khong mo duoc NetGuard. Hay kiem tra moi truong .venv theo README.md.
+    pause
+    exit /b 1
+)
