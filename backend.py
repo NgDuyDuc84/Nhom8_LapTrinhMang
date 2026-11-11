@@ -31,6 +31,7 @@ class BackendBase(QObject):
     connection_changed = Signal(object)  # dict: card, IP, gateway hiện tại
     measurement_changed = Signal(object) # dict: kết quả và lỗi đo từng chu kỳ
     devices_refreshed = Signal()         # một lượt quét thật đã hoàn tất
+    network_refresh_changed = Signal(object)  # dict: tiến độ/kết quả làm mới theo yêu cầu
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -46,6 +47,13 @@ class BackendBase(QObject):
 
     def get_connection_status(self) -> dict:
         return {}
+
+    def refresh_network(self) -> bool:
+        """Hẹn đọc lại kết nối, quét và đo mới; False nếu một lượt đang chờ."""
+        raise NotImplementedError
+
+    def get_refresh_status(self) -> dict:
+        return {"request_id": 0, "running": False, "message": "", "errors": []}
 
     def get_latest_measurements(self) -> dict:
         return {}
@@ -119,9 +127,16 @@ class Backend(BackendBase):
         self._state_lock = threading.RLock()
         self._last_traceroute: tuple[datetime, list[Hop]] | None = None
         self._diagnoses: list[Diagnosis] = []
+        self._latest_diagnosis: Diagnosis | None = None
         self._connection: dict = {}
         self._latest_measurements: dict = {}
         self._session_macs: set[str] = set()
+        self._refresh_pending: set[str] = set()
+        self._refresh_errors: list[str] = []
+        self._refresh_scan_macs: set[str] | None = None
+        self._refresh_scan_connection: tuple | None = None
+        self._refresh_request_id = 0
+        self._refresh_status = {"request_id": 0, "running": False, "message": "", "errors": []}
 
     # ------------------------------------------------------------------ vòng đời
     def start(self) -> None:
@@ -148,6 +163,7 @@ class Backend(BackendBase):
             iface=iface,
             on_interface=self._refresh_arp_interface,
             on_scan=self._emit_scan,
+            on_refresh=self._on_scan_refresh,
         )
         self._ping_monitor = PingMonitor(
             on_ping=self.ping_result.emit,
@@ -155,6 +171,7 @@ class Backend(BackendBase):
             iface=iface,
             on_cycle=self._emit_measurements,
             on_interface=self._emit_connection,
+            on_refresh=self._on_ping_refresh,
         )
         try:
             for device in repository.list_devices():
@@ -169,6 +186,11 @@ class Backend(BackendBase):
         """Dừng luồng quét và đóng kết nối CSDL. Gọi nhiều lần vẫn an toàn."""
         from db import database
 
+        with self._state_lock:
+            self._refresh_pending.clear()
+            self._refresh_status = {
+                "request_id": self._refresh_request_id, "running": False, "message": "", "errors": [],
+            }
         if self._loop is not None:
             self._loop.stop()
             self._loop = None
@@ -217,6 +239,7 @@ class Backend(BackendBase):
             self._connection = status
             # Các phép đo cũ không thể hiện trạng thái của kết nối mới.
             self._latest_measurements = {}
+            self._latest_diagnosis = None
             self._session_macs.clear()
         self.connection_changed.emit(dict(status))
 
@@ -243,13 +266,94 @@ class Backend(BackendBase):
         with self._state_lock:
             return dict(self._connection)
 
+    def get_refresh_status(self) -> dict:
+        with self._state_lock:
+            return {**self._refresh_status, "errors": list(self._refresh_status["errors"])}
+
+    def refresh_network(self) -> bool:
+        """Chạy trên các worker có sẵn; không tạo scan hoặc ping song song mới."""
+        with self._state_lock:
+            if self._refresh_pending:
+                return False
+            scan, ping = self._loop, self._ping_monitor
+            if scan is None or ping is None or not scan.is_running() or not ping.is_running():
+                raise RuntimeError("Dịch vụ mạng chưa sẵn sàng. Hãy mở lại NetGuard rồi thử lại.")
+            self._refresh_pending = {"scan", "ping"}
+            self._refresh_request_id += 1
+            self._refresh_errors = []
+            self._refresh_scan_macs = None
+            self._refresh_scan_connection = None
+            self._session_macs.clear()
+            self._latest_measurements = {}
+            self._latest_diagnosis = None
+            self._refresh_status = {
+                "request_id": self._refresh_request_id,
+                "running": True,
+                "message": "Đang làm mới kết nối, quét thiết bị và đo lại mạng…",
+                "errors": [],
+            }
+        self.network_refresh_changed.emit(self.get_refresh_status())
+        for name, service in (("scan", scan), ("ping", ping)):
+            try:
+                service.request_refresh()
+            except Exception as exc:
+                self._finish_refresh(name, str(exc))
+        return True
+
+    def _on_scan_refresh(self, iface, entries, error: str | None) -> None:
+        with self._state_lock:
+            if "scan" not in self._refresh_pending:
+                return
+            if error is None and entries is not None:
+                self._refresh_scan_macs = {entry.mac.lower() for entry in entries}
+                self._refresh_scan_connection = (
+                    iface.name, iface.ip, iface.netmask, iface.gateway,
+                ) if iface else None
+        self._finish_refresh("scan", error)
+
+    def _on_ping_refresh(self, error: str | None) -> None:
+        self._finish_refresh("ping", error)
+
+    def _finish_refresh(self, service: str, error: str | None) -> None:
+        with self._state_lock:
+            if service not in self._refresh_pending:
+                return
+            self._refresh_pending.remove(service)
+            if error:
+                label = "Quét thiết bị" if service == "scan" else "Đo kết nối"
+                self._refresh_errors.append(f"{label}: {error}")
+            if self._refresh_pending:
+                return  # Chỉ worker cuối phát kết quả, tránh đảo thứ tự signal.
+            connection = self._connection
+            current_key = tuple(connection.get(key, "") for key in ("name", "ip", "netmask", "gateway"))
+            if self._refresh_scan_macs is not None and self._refresh_scan_connection == current_key:
+                # Ping có thể đổi kết nối sau khi scan xong; xác minh lại tại đây.
+                self._session_macs = set(self._refresh_scan_macs)
+            else:
+                self._session_macs.clear()
+                if self._refresh_scan_macs is not None:
+                    self._refresh_errors.append("Kết nối đã thay đổi trong lúc làm mới; hãy thử lại.")
+            if self._refresh_errors:
+                message = "Làm mới gặp lỗi. " + " | ".join(self._refresh_errors)
+            else:
+                message = f"Đã làm mới mạng lúc {now():%H:%M:%S}."
+            self._refresh_status = {
+                "request_id": self._refresh_request_id,
+                "running": False,
+                "message": message,
+                "errors": list(self._refresh_errors),
+            }
+            snapshot = self.get_refresh_status()
+        self.devices_refreshed.emit()
+        self.network_refresh_changed.emit(snapshot)
+
     def get_latest_measurements(self) -> dict:
         with self._state_lock:
             return dict(self._latest_measurements)
 
     def get_latest_diagnosis(self) -> Diagnosis | None:
         with self._state_lock:
-            return self._diagnoses[-1] if self._diagnoses else None
+            return self._latest_diagnosis
 
     def get_device_status(self, device: Device) -> str:
         with self._state_lock:
@@ -274,6 +378,7 @@ class Backend(BackendBase):
         with self._state_lock:
             self._diagnoses.append(diagnosis)
             self._diagnoses = self._diagnoses[-500:]
+            self._latest_diagnosis = diagnosis
         self.diagnosis_changed.emit(diagnosis)
 
     def _emit_arp_observation(self, observation) -> None:

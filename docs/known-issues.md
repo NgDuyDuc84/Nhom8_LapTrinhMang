@@ -41,3 +41,11 @@ hạn chế hiện tại của phần quét và hiển thị dữ liệu khi chu
 - Đưa thông báo quét vượt giới hạn lên UI.
 - Thiết kế quét có giới hạn phạm vi, thời gian và tiến độ cho subnet lớn.
 - Kiểm tra lại tình huống đổi Wi-Fi giữa các subnet khác nhau.
+
+### Cập nhật khi triển khai nút làm mới mạng — 11/11/2026
+
+GUI đã có nút **Làm mới mạng** để chọn lại card đang hoạt động, quét và đo mới.
+Lỗi vượt giới hạn subnet của lượt làm mới theo yêu cầu hiện được hiển thị trên UI.
+Giới hạn `MAX_SCAN_HOSTS` và việc lưu thiết bị chưa tách theo mạng chưa được thay đổi;
+thiết bị cũ vẫn được giữ trong danh sách đã biết và có thể ở trạng thái chưa xác minh.
+Lỗi của các lượt quét tự động chưa có kênh trạng thái UI riêng.

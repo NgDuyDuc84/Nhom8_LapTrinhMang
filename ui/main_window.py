@@ -96,6 +96,8 @@ class MainWindow(QMainWindow):
         apply_light_theme(QApplication.instance())
         self._device_rows: dict[str, int] = {}
         self._refreshing = False
+        self._network_refresh_running = False
+        self._network_refresh_request_id = 0
         self._latest_diagnosis = backend.get_latest_diagnosis()
         self._measurements = backend.get_latest_measurements()
 
@@ -110,6 +112,11 @@ class MainWindow(QMainWindow):
         toolbar_spacer = QWidget()
         toolbar_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(toolbar_spacer)
+
+        self.refresh_action = QPushButton("Làm mới mạng")
+        self.refresh_action.setToolTip("Đọc lại kết nối đang dùng, quét thiết bị và lấy mẫu đo mới.")
+        self.refresh_action.clicked.connect(self.request_network_refresh)
+        self.toolbar.addWidget(self.refresh_action)
 
         self.trust_action = QPushButton("Tin cậy")
         self.trust_action.clicked.connect(self.toggle_selected_trust)
@@ -153,6 +160,11 @@ class MainWindow(QMainWindow):
         self.connection_label.setTextFormat(Qt.RichText)
         self.connection_label.setWordWrap(True)
         main_layout.addWidget(self.connection_label)
+        self.refresh_status_label = QLabel()
+        self.refresh_status_label.setTextFormat(Qt.PlainText)
+        self.refresh_status_label.setWordWrap(True)
+        self.refresh_status_label.hide()
+        main_layout.addWidget(self.refresh_status_label)
         self.environment_label = QLabel("\n".join(warnings or []))
         self.environment_label.setObjectName("environment")
         self.environment_label.setTextFormat(Qt.PlainText)
@@ -213,6 +225,7 @@ class MainWindow(QMainWindow):
         self.refresh_devices()
         self.refresh_alerts()
         self.refresh_diagnosis()
+        self.on_network_refresh_changed(backend.get_refresh_status())
 
     def _connect_backend_signals(self) -> None:
         self.backend.device_updated.connect(self.on_device_updated)
@@ -222,6 +235,41 @@ class MainWindow(QMainWindow):
         self.backend.connection_changed.connect(self.on_connection_changed)
         self.backend.measurement_changed.connect(self.on_measurement_changed)
         self.backend.devices_refreshed.connect(self.refresh_devices)
+        self.backend.network_refresh_changed.connect(self.on_network_refresh_changed)
+
+    @Slot()
+    def request_network_refresh(self) -> None:
+        try:
+            self.backend.refresh_network()
+            self.on_network_refresh_changed(self.backend.get_refresh_status())
+        except Exception as exc:
+            self.on_network_refresh_changed({
+                "running": False,
+                "message": f"Không thể làm mới mạng: {exc}",
+                "errors": [str(exc)],
+            })
+
+    @Slot(object)
+    def on_network_refresh_changed(self, status: dict) -> None:
+        request_id = status.get("request_id", self._network_refresh_request_id)
+        if request_id < self._network_refresh_request_id:
+            return  # Qt có thể còn đang giao signal của lượt làm mới trước.
+        self._network_refresh_request_id = request_id
+        running = bool(status.get("running"))
+        began = running and not self._network_refresh_running
+        self._network_refresh_running = running
+        self.refresh_action.setEnabled(not running)
+        self.refresh_action.setText("Đang làm mới…" if running else "Làm mới mạng")
+        message = status.get("message", "")
+        self.refresh_status_label.setText(message)
+        self.refresh_status_label.setVisible(bool(message))
+        tone = "pending" if running else "danger" if status.get("errors") else "success"
+        self.refresh_status_label.setStyleSheet(badge_stylesheet(tone))
+        if began:
+            self._latest_diagnosis = None
+            self._measurements = {}
+            self.refresh_devices()
+            self.refresh_diagnosis()
 
     def _init_devices_tab(self) -> None:
         layout = QVBoxLayout(self.devices_tab)

@@ -55,11 +55,13 @@ class PingMonitor:
         interval: float = PING_INTERVAL_SEC,
         interface_resolver: Callable[[], NetInterface] | None = None,
         on_interface: Callable[[NetInterface | None], None] | None = None,
+        on_refresh: Callable[[str | None], None] | None = None,
     ) -> None:
         self._on_ping = on_ping or (lambda result: None)
         self._on_diagnosis = on_diagnosis or (lambda result: None)
         self._on_cycle = on_cycle or (lambda results: None)
         self._on_interface = on_interface or (lambda chosen: None)
+        self._on_refresh = on_refresh or (lambda error: None)
         self._iface = iface
         self._preferred_iface = iface
         self._resolve_interface = interface_resolver or (lambda: get_active_interface(self._preferred_iface))
@@ -74,6 +76,9 @@ class PingMonitor:
         }
         self._isp_ip: str | None = None
         self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
+        self._refresh_lock = threading.Lock()
+        self._refresh_requested = False
         self._thread: threading.Thread | None = None
         self._route_thread: threading.Thread | None = None
         self._route_lock = threading.Lock()
@@ -103,6 +108,7 @@ class PingMonitor:
     def stop(self, timeout: float = 30.0) -> None:
         """Dừng ping và chờ các luồng phụ kết thúc."""
         self._stop_event.set()
+        self._wake_event.set()
         current = threading.current_thread()
         for thread in (self._thread, self._route_thread):
             if thread is not None and thread is not current and thread.is_alive():
@@ -114,35 +120,55 @@ class PingMonitor:
         """True nếu luồng ping chính đang chạy."""
         return self._thread is not None and self._thread.is_alive()
 
+    def request_refresh(self) -> None:
+        """Đánh thức worker để chọn lại card và thu mẫu mới, không đo chồng nhau."""
+        with self._refresh_lock:
+            if not self.is_running() or self._stop_event.is_set():
+                raise RuntimeError("Dịch vụ đo mạng chưa chạy hoặc đang dừng.")
+            self._refresh_requested = True
+            self._wake_event.set()
+
     def _run(self) -> None:
         """Lặp ping theo chu kỳ; lỗi một mốc không làm chết monitor."""
         while not self._stop_event.is_set():
+            with self._refresh_lock:
+                refresh = self._refresh_requested
+                self._refresh_requested = False
+                self._wake_event.clear()
+            if self._stop_event.is_set():
+                break
             cycle_started = time.monotonic()
             try:
-                self._cycle()
+                error = self._cycle(reselect=refresh)
             except Exception as exc:
                 self.last_error = str(exc)
+                error = str(exc)
                 _log(f"[ping lỗi] {exc} — sẽ thử lại ở chu kỳ sau")
+            if refresh:
+                self._safe_callback(self._on_refresh, error)
             self._maybe_start_route_discovery()
-            self._stop_event.wait(max(0.0, self._interval - (time.monotonic() - cycle_started)))
+            self._wake_event.wait(max(0.0, self._interval - (time.monotonic() - cycle_started)))
 
-    def _cycle(self) -> None:
+    def _cycle(self, *, reselect: bool = False) -> str | None:
+        """Trả lỗi của chính chu kỳ này để báo kết quả làm mới, nếu có."""
         self.last_error = None
         self.target_status = {}
         self._addresses = dict.fromkeys(self._history)
+        if reselect:
+            self._preferred_iface = None
         try:
             iface = self._resolve_interface()
         except (RuntimeError, OSError, ValueError) as exc:
-            self._set_interface(None)
+            self._set_interface(None, force=reselect)
             self.last_error = str(exc)
             self.target_status = {name: "chưa kết nối LAN" for name in self._history}
             self._safe_callback(self._on_cycle, {name: None for name in self._history})
             self._update_stable_diagnosis(Diagnosis(
                 "home_issue", f"Máy đang mất kết nối LAN hoặc chưa có cấu hình IPv4. {exc}",
             ), immediate=True)
-            return
+            return str(exc)
 
-        self._set_interface(iface)
+        self._set_interface(iface, force=reselect)
         if self._preferred_iface is None:
             self._preferred_iface = iface
         if not iface.gateway:
@@ -156,7 +182,11 @@ class PingMonitor:
                 "unknown", f"Card '{iface.name}' có IPv4 nhưng không có gateway mặc định; "
                 "chưa thể chẩn đoán đường ra Internet.",
             ), immediate=True)
-            return
+            return "Không có gateway mặc định; chưa đo được kết nối Internet."
+        if reselect:
+            self._update_stable_diagnosis(Diagnosis(
+                "unknown", "Đã làm mới mạng; đang thu thập mẫu mới để chẩn đoán.",
+            ), immediate=True)
         addresses = {
             "router": iface.gateway or None,
             "isp": self._isp_ip,
@@ -164,6 +194,7 @@ class PingMonitor:
         }
         self._addresses = addresses
         cycle_results: dict[str, PingResult | None] = {name: None for name in addresses}
+        cycle_error = None
         for target, address in addresses.items():
             if self._stop_event.is_set():
                 return
@@ -174,6 +205,7 @@ class PingMonitor:
                 rtt = self._pinger(address, PING_TIMEOUT_SEC)
             except Exception as exc:
                 self.last_error = str(exc)
+                cycle_error = str(exc)
                 _log(f"[ping {target}] {exc}")
                 self.target_status[target] = f"lỗi đo: {exc}"
                 # Không ghi lỗi tạo/gửi socket thành một mẫu mất gói.
@@ -190,12 +222,13 @@ class PingMonitor:
                  for name in self._history}
         current = diagnose(stats["router"], stats["isp"], stats["external"])
         self._update_stable_diagnosis(current)
+        return cycle_error
 
-    def _set_interface(self, iface: NetInterface | None) -> None:
+    def _set_interface(self, iface: NetInterface | None, *, force: bool = False) -> None:
         key = (iface.index, iface.name, iface.ip, iface.netmask, iface.gateway) if iface else None
         with self._route_lock:
             self._iface = iface
-            if key == self._network_key:
+            if key == self._network_key and not force:
                 return
             self._network_key = key
             self._network_generation += 1
@@ -203,6 +236,8 @@ class PingMonitor:
             self._last_route_attempt = 0.0
             self._pending_windows = 0
             self._pending_verdict = None
+            self._last_emitted_verdict = None
+            self._last_emitted_text = None
             for history in self._history.values():
                 history.clear()
         self._safe_callback(self._on_interface, iface)

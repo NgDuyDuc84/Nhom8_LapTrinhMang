@@ -168,8 +168,9 @@ Chương trình đọc lại cấu hình card ở mỗi chu kỳ quét (30 giây
 khi cấu hình thay đổi và tự quét tiếp khi kết nối trở lại. Một lần quét lỗi không
 được dùng để kết luận tất cả thiết bị đã offline. Các lệnh `monitor` và `diagnose`
 có thể khởi động khi chưa kết nối LAN; quyền Administrator và Npcap vẫn cần thiết.
-Sau khi chọn được card, chương trình tiếp tục theo dõi card đó. Muốn đổi sang card
-khác, dừng bằng Ctrl+C và chạy lại lệnh.
+Sau khi chọn được card, các lệnh CLI tiếp tục theo dõi card đó. Muốn đổi sang card
+khác trong CLI, dừng bằng Ctrl+C và chạy lại lệnh. Trên GUI, dùng nút **Làm mới mạng**
+để chọn lại kết nối đang hoạt động mà không phải đóng ứng dụng.
 
 Các lệnh chạy một lần như `scan` hoặc `trace` báo lỗi rõ khi chưa kết nối; cần chạy
 lại sau khi có mạng. Traceroute ra Internet cần gateway. Nếu chỉ ngắt đường Internet
@@ -303,6 +304,26 @@ online/offline từng thiết bị, xuất CSV, quét kênh Wi-Fi và demo Zalo.
 
 Hãng được tra từ `data/oui.csv`; MAC chưa có trong danh sách sẽ hiện **Chưa xác
 định**. Tên/ghi chú do người dùng đặt và lịch sử đã lưu vẫn được giữ nguyên.
+
+### 5.5. Làm mới mạng ngay trên giao diện
+
+Bấm **Làm mới mạng** trên thanh công cụ, cạnh nút **Tin cậy**. Ứng dụng sẽ đọc lại
+card đang hoạt động, IP/mặt nạ/gateway, quét thiết bị và lấy các mẫu đo kết nối mới.
+Có thể dùng sau khi đổi Wi-Fi, chuyển Wi-Fi/Ethernet hoặc khi muốn kiểm tra lại ngay.
+
+- Trong lúc thực hiện, nút chuyển thành **Đang làm mới…** và tạm khóa. Nếu đang có
+  lượt quét/đo, yêu cầu chờ lượt đó kết thúc rồi thực hiện trên cùng dịch vụ nền.
+- Dòng bên dưới thông tin kết nối báo thời điểm hoàn tất hoặc lỗi cụ thể. Có thể
+  thử lại sau khi kết nối trở lại. Quét lỗi không được tính là một lượt thiết bị vắng mặt.
+- Tên, ghi chú, cờ tin cậy và lịch sử trong CSDL được giữ lại. Thiết bị cũ vẫn có
+  trong danh sách đã biết; những thiết bị thấy trong lượt mới được xác minh lại.
+- Các mẫu thống kê chẩn đoán trong bộ nhớ được thu thập lại; lịch sử đã lưu không bị xóa.
+  Tab Chẩn đoán chờ đủ mẫu trước khi đưa ra kết luận mới. Việc tìm hop ISP tiếp tục ở nền.
+- Nếu kết nối thay đổi trong lúc làm mới, ứng dụng yêu cầu thử lại để tránh xác nhận
+  kết quả quét của kết nối khác. Nút này không tự kết nối hoặc đổi Wi-Fi trong Windows.
+
+Giới hạn subnet lớn hiện vẫn áp dụng: mạng vượt 1.024 host sẽ báo lỗi quét trên dòng
+làm mới. Việc mở rộng phạm vi quét và tách lịch sử theo mạng là các phần sửa tiếp theo.
 
 ## 6. Lỗi thường gặp
 
