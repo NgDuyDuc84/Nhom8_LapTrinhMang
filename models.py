@@ -21,6 +21,13 @@ def now() -> datetime:
     return datetime.now(TZ_VIETNAM).replace(tzinfo=None)
 
 
+def local_time(value: datetime) -> datetime:
+    """API nhận aware datetime hoặc giờ Việt Nam naive; lưu thống nhất GMT+7."""
+    if not isinstance(value, datetime):
+        raise ValueError("Thời gian phải là datetime.")
+    return value.astimezone(TZ_VIETNAM).replace(tzinfo=None) if value.tzinfo else value
+
+
 @dataclass
 class Device:
     """Một thiết bị nhìn thấy trong mạng LAN."""
@@ -60,7 +67,7 @@ class DeviceHints:
     sources: set[str] = field(default_factory=set)
 
 
-@dataclass
+@dataclass(frozen=True)
 class PingResult:
     """Một lần đo ping tới một mốc.
 
@@ -72,6 +79,9 @@ class PingResult:
     rtt_ms: float | None
     loss_pct: float
     ts: datetime = field(default_factory=now)
+    address: str = ""
+    session_id: str = ""
+    status: str = "ok"
 
 
 @dataclass
@@ -86,9 +96,13 @@ class Alert:
     message: str
     device_mac: str | None = None
     ts: datetime = field(default_factory=now)
+    kind: str = "general"
+    id: int | None = None
+    acknowledged: bool = False
+    network_id: str = ""
 
 
-@dataclass
+@dataclass(frozen=True)
 class Diagnosis:
     """Kết luận chẩn đoán mạng.
 
@@ -101,7 +115,7 @@ class Diagnosis:
     ts: datetime = field(default_factory=now)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Hop:
     """Một chặng trên đường đi của traceroute."""
 

@@ -304,11 +304,11 @@ def test_ping_refresh_waits_for_inflight_measurement_and_wakes_long_interval(ui,
         assert started.wait(2)
         for _ in range(20):
             monitor.request_refresh()
-        assert len(calls) == 1
+        assert 1 <= len(calls) <= 2  # Hai probe của cùng chu kỳ chạy song song, không tạo chu kỳ chồng nhau.
         release.set()
         wait_for(refreshed.is_set, app)
         assert len(calls) == 4  # Hai mốc có địa chỉ, hai chu kỳ; chưa biết hop ISP.
-        assert len({worker for address, worker in calls}) == 1
+        assert 1 <= len({worker for address, worker in calls}) <= 4  # Probe song song, các chu kỳ vẫn tuần tự.
     finally:
         release.set()
         monitor.stop(timeout=2)
@@ -431,5 +431,5 @@ def test_backend_start_wires_refresh_to_real_service_workers(monkeypatch, ui, if
     assert scanner.call_count >= 2
     assert listener_factory.call_count >= 2
     assert not backend.get_refresh_status()["errors"]
-    assert backend.get_device_status(repository.get_device(iface.mac)) == "Online"
+    assert backend.get_device_status(next(d for d in backend.list_devices() if d.mac == iface.mac)) == "Online"
     assert "Đã làm mới mạng lúc" in window.refresh_status_label.text()

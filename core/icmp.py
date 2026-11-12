@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import time
 
-from icmplib import ping
-from icmplib.exceptions import ICMPLibError
+from icmplib import ICMPv4Socket, ICMPRequest
+from icmplib.utils import unique_identifier
+from icmplib.exceptions import ICMPLibError, TimeoutExceeded, ICMPError
+import socket
 
 __all__ = ["ping_once", "ping_series"]
 
@@ -25,8 +27,7 @@ def _friendly_error(exc: Exception) -> RuntimeError:
         for marker in ("permission", "access is denied", "winerror 5", "operation not permitted")
     ):
         return RuntimeError(
-            "Không đủ quyền gửi gói ICMP. Hãy mở PowerShell bằng 'Run as administrator' "
-            "rồi chạy lại."
+            "Không đủ quyền gửi gói ICMP. Hãy mở lại Mo_NetGuard.cmd và chấp nhận cấp quyền."
         )
     if "npcap" in message or "wpcap" in message:
         return RuntimeError("Chưa cài Npcap hoặc Npcap chưa chạy; hãy kiểm tra dịch vụ Npcap.")
@@ -43,20 +44,19 @@ def ping_once(addr: str, timeout: float = 1.0, *, source: str | None = None) -> 
         raise ValueError("Thời gian chờ ping phải lớn hơn 0.")
 
     try:
-        host = ping(
-            addr,
-            count=1,
-            interval=0,
-            timeout=timeout,
-            source=source or _source_address(),
-            family=4,
-            privileged=True,
-        )
+        address = socket.gethostbyname(addr)
+        request = ICMPRequest(destination=address, id=unique_identifier(), sequence=0)
+        with ICMPv4Socket(source or _source_address(), privileged=True) as sock:
+            # Không dùng ping(): phiên bản thư viện này nuốt ngoại lệ send().
+            sock.send(request)
+            try:
+                reply = sock.receive(request, timeout)
+                reply.raise_for_status()
+            except (TimeoutExceeded, ICMPError):
+                return None
+            return max(0.0, (reply.time-request.time)*1000)
     except (ICMPLibError, OSError, PermissionError) as exc:
         raise _friendly_error(exc) from exc
-
-    return float(host.avg_rtt) if host.packets_received else None
-
 
 def ping_series(
     addr: str,

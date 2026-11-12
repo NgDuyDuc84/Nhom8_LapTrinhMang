@@ -24,6 +24,7 @@ class TargetStats:
     rtt_baseline: float | None
     samples: int
     available: bool = True
+    rtt_limit: float | None = None
 
 
 def is_bad(stats: TargetStats) -> bool:
@@ -31,6 +32,8 @@ def is_bad(stats: TargetStats) -> bool:
     if not stats.available or stats.samples < DIAG_MIN_SAMPLES:
         return False
     if stats.loss_pct > LOSS_BAD_PCT:
+        return True
+    if stats.rtt_median is not None and stats.rtt_limit is not None and stats.rtt_median > stats.rtt_limit:
         return True
     if stats.rtt_median is None or stats.rtt_baseline is None:
         return False
@@ -44,30 +47,19 @@ def diagnose(
     external: TargetStats,
 ) -> Diagnosis:
     """Kết luận lỗi ở mạng nhà, ISP, Internet hoặc chưa đủ dữ liệu."""
-    if router.available and router.samples >= DIAG_MIN_SAMPLES and is_bad(router):
-        return Diagnosis("home_issue", "Lỗi trong mạng nhà (Wi-Fi, tín hiệu hoặc router).")
-
-    if not router.available:
-        return Diagnosis("unknown", "Không đo được router; hãy kiểm tra gateway và kết nối LAN.")
-
-    if router.samples < DIAG_MIN_SAMPLES:
-        return Diagnosis("unknown", "Chưa đủ dữ liệu ping router để kết luận.")
-
-    if isp is not None and isp.available and isp.samples >= DIAG_MIN_SAMPLES and is_bad(isp):
-        return Diagnosis("isp_issue", "Lỗi ở đường truyền hoặc phía nhà mạng.")
-
-    external_bad = external.available and external.samples >= DIAG_MIN_SAMPLES and is_bad(external)
     if not external.available or external.samples < DIAG_MIN_SAMPLES:
-        return Diagnosis("unknown", "Chưa đủ dữ liệu ping máy chủ bên ngoài để kết luận.")
-
-    if isp is None or not isp.available or isp.samples < DIAG_MIN_SAMPLES:
-        if external_bad:
-            return Diagnosis(
-                "internet_issue",
-                "Lỗi phía Internet hoặc server đích; chưa xác định được hop nhà mạng.",
-            )
-        return Diagnosis("unknown", "Chưa xác định được hop nhà mạng để kết luận đầy đủ.")
-
-    if external_bad:
-        return Diagnosis("internet_issue", "Lỗi xa hơn, phía Internet hoặc server đích.")
-    return Diagnosis("ok", "Mạng bình thường: ba mốc ping đều ổn định.")
+        return Diagnosis("unknown", "Chưa đủ dữ liệu đích cuối để đối chiếu đường truyền.")
+    external_bad = is_bad(external)
+    router_bad = is_bad(router)
+    hop_bad = bool(isp and is_bad(isp))
+    if not router.available or router.samples < DIAG_MIN_SAMPLES:
+        return Diagnosis("unknown", "Chưa đủ dữ liệu ping router để đối chiếu.")
+    if not external_bad:
+        if router_bad or hop_bad:
+            return Diagnosis("unknown", "Đích cuối vẫn phản hồi tốt; mốc trung gian có thể hạn chế ICMP. Chưa có bằng chứng lỗi chuyển tiếp.")
+        return Diagnosis("ok", "Các phép đo ICMP đang ổn định; chưa kiểm tra DNS, HTTP hoặc băng thông.")
+    if router_bad:
+        return Diagnosis("home_issue", "Nghi ngờ mạng LAN/router: suy giảm được quan sát cả ở router và đích cuối.")
+    if hop_bad:
+        return Diagnosis("isp_issue", "Nghi ngờ đường sau gateway: mốc trung gian và đích cuối cùng suy giảm; chưa xác minh chủ sở hữu hop.")
+    return Diagnosis("internet_issue", "Đích ngoài phản hồi kém trong khi router ổn định; có thể do đường truyền hoặc đích hạn chế ICMP.")

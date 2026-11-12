@@ -48,6 +48,7 @@ def test_real_ui_uses_backend_diagnosis_even_without_ping_history(real_ui):
 
     backend, window = real_ui
     backend._emit_diagnosis(Diagnosis('home_issue', 'Mất kết nối Wi-Fi được xác nhận.'))
+    window.refresh_diagnosis()
     assert window.verdict_label.text() == 'home_issue'
     assert window.diagnosis_text.text() == 'Mất kết nối Wi-Fi được xác nhận.'
 
@@ -82,6 +83,7 @@ def test_real_scan_updates_ui_and_marks_cached_devices_unverified(real_ui):
     loop = ScanLoop(interface_resolver=lambda: iface, scanner=lambda chosen: [entry],
                     on_device=backend._emit_device, on_scan=backend._emit_scan)
     loop.scan_once()
+    window.refresh_devices()
     row = window._device_rows[iface.mac]
     assert window.device_table.item(row, Col.NAME).text() == 'Máy tính này'
     assert window.device_table.item(row, Col.IP).text() == iface.ip

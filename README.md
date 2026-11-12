@@ -1,388 +1,110 @@
-# Nhom8_LapTrinhMang
+# NetGuard - giám sát LAN trên Windows
 
-# Hướng dẫn cài đặt và chạy dự án
+NetGuard quét ARP, nhận diện thiết bị từ MAC/OUI và thông tin LAN, đo ICMP, ghi lịch sử SQLite và xuất PDF/CSV. Phạm vi hỗ trợ là Windows 10/11, IPv4 trong LAN cùng miền broadcast; không xác thực danh tính thiết bị hoặc chứng minh toàn bộ Internet hoạt động tốt.
 
-Ứng dụng desktop bằng **Python** để giám sát mạng LAN: quét thiết bị bằng ARP, cảnh báo thiết bị lạ, chẩn đoán mạng chậm bằng ICMP, xuất báo cáo PDF.
+## Cài đặt
 
-> Mở hằng ngày: nhấp đúp **`Mo_NetGuard.cmd`**, bấm **Yes** khi Windows hỏi cấp quyền.
-> Không cần mở PowerShell bằng Administrator hoặc kích hoạt `.venv` mỗi lần.
-> Ứng dụng tự xin quyền cần thiết; vẫn cần cài Npcap và các thư viện ở lần cài đặt đầu tiên.
-
-## 1. Yêu cầu hệ thống
-
-| Thành phần | Yêu cầu | Kiểm tra |
-|---|---|---|
-| Hệ điều hành | Windows 10 hoặc 11, 64-bit | `winver` |
-| Python | 3.11 hoặc 3.12 khuyến nghị; môi trường phát triển hiện tại dùng 3.14.7 | `python --version` |
-| Npcap | Bản mới nhất từ https://npcap.com | `sc query npcap` phải ra `STATE: 4 RUNNING` |
-| Git | Bản mới nhất | `git --version` |
-| Mạng | Wi-Fi hoặc Ethernet thật, **không bật client isolation** | Ping được điện thoại cùng mạng |
-
-Cần cài thêm để test (không bắt buộc để chạy):
-
-| Công cụ | Dùng để |
-|---|---|
-| Wireshark | Đối chiếu gói ARP/ICMP chương trình gửi ra |
-| Clumsy | Giả lập mất gói và trễ để thử phần chẩn đoán |
-| Điện thoại hoặc laptop thứ hai | Giả lập "thiết bị lạ" |
-
-## 2. Cài Npcap
-
-1. Tải bản cài từ npcap.com, chạy bằng "Run as administrator".
-2. Cài với tùy chọn mặc định. Tick thêm "WinPcap API-compatible Mode" cũng được.
-3. Mở CMD bằng quyền admin, gõ `sc query npcap`. Phải thấy `RUNNING`. (Gõ đúng, không có dấu chấm ở cuối.)
-4. Nếu báo lỗi 1060 thì khởi động lại máy rồi thử lại.
-
-## 3. Cài dự án
-
-Mở **PowerShell**, chạy từng lệnh:
+Cài Python 3.11 trở lên (CI dùng 3.12; môi trường kiểm tra hiện tại là 3.14.7) và Npcap từ [trang chính thức](https://npcap.com/). Tạo môi trường tại thư mục dự án:
 
 ```powershell
-git clone https://github.com/NgDuyDuc84/Nhom8_LapTrinhMang.git
-cd Nhom8_LapTrinhMang
-
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-python -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Nếu PowerShell báo lỗi "running scripts is disabled", chạy lệnh này rồi kích hoạt lại venv:
+Không cần kích hoạt `.venv`. Không cần Matplotlib: biểu đồ PDF dùng ReportLab và font Noto Sans có giấy phép trong `assets/fonts/`.
+
+## Mở ứng dụng
+
+- Nhấp đúp **Mo_NetGuard.cmd**. Windows hỏi quyền bắt gói một lần; chọn Yes để giám sát. Không phải tự mở PowerShell Administrator.
+- Nhấp đúp **Mo_LichSu.cmd** để mở dữ liệu/lịch sử và xuất báo cáo mà không bật dịch vụ mạng hoặc yêu cầu quyền bắt gói.
+- Thoát bản đang chạy qua menu khay hệ thống trước khi mở lại sau một lần cập nhật mã. Nếu khay không khả dụng, đóng cửa sổ sẽ thoát ứng dụng.
+- Chỉ một tiến trình giám sát dùng cùng thư mục dữ liệu được phép chạy. Chế độ xem lịch sử có thể dùng riêng.
+
+Lỗi khởi động nằm ở `logs/startup.log`; lỗi dịch vụ và traceback nằm ở `logs/netguard.log` có giới hạn dung lượng.
+
+## Dùng giao diện
+
+Bấm **Làm mới mạng** để đọc lại card, quét và đo lại. Các yêu cầu được thực hiện trên worker có sẵn; các chu kỳ không chồng nhau. Capture hỏng hoặc kết nối đổi trong lúc quét sẽ làm lượt quét thất bại; không tăng bộ đếm vắng mặt hay ghi kết quả cũ sang mạng mới.
+
+Bảng ưu tiên tên, loại thiết bị, hãng. **Hiện MAC / IP** hoặc **Chi tiết / Sửa tên** cho xem địa chỉ, bằng chứng và lựa chọn loại thủ công. OUI tra ngoại tuyến; MAC riêng tư/cục bộ có thể không xác định hãng. Tên, model và dịch vụ tự công bố chỉ là gợi ý.
+
+Trong **Công cụ**:
+
+1. Kiểm tra danh sách, đánh dấu thiết bị quen thuộc **Tin cậy**, rồi chọn **Hoàn tất thiết lập / Bật cảnh báo**. Hai thao tác này có ý nghĩa riêng. Thiết bị chưa tin cậy đã tồn tại, xuất hiện lại hoặc vừa bị bỏ tin cậy đều có thể được cảnh báo; không báo định kỳ chỉ vì hết cooldown.
+2. Chọn đúng router rồi dùng **Xác nhận MAC router đã chọn** sau khi đối chiếu thiết bị thực tế. MAC này là mốc so sánh được người dùng chấp nhận, không phải xác thực mật mã.
+3. Xem lịch sử thiết bị, chạy traceroute nền, xuất CSV, quét Wi-Fi hoặc mở cài đặt.
+4. Sao lưu/khôi phục hồ sơ mạng bằng API backup của SQLite. Khôi phục dừng worker và tạo bản sao trước khi ghi dữ liệu.
+5. Chọn **Xem hồ sơ mạng / lịch sử cũ** để xem mạng khác hoặc dữ liệu trước khi ứng dụng có định danh mạng. Quay lại theo dõi bằng lựa chọn kết nối hiện tại; chế độ bắt gói vẫn cần quyền thích hợp.
+
+Tab Cảnh báo có tìm kiếm, trang trước/sau và đánh dấu đã xử lý. Tab Chẩn đoán có biểu đồ RTT/loss; mốc giữa được gọi là **hop sau gateway**, chưa xác minh thuộc ISP. Một hop trung gian phản hồi kém trong khi đích cuối tốt không đủ để kết luận ISP lỗi.
+
+## Dữ liệu, nâng cấp và hồ sơ mạng
+
+- Đường dẫn được tính từ vị trí dự án, không phụ thuộc thư mục làm việc.
+- `data/netguard.db` giữ dữ liệu cũ chưa có định danh mạng; **không tự chuyển tin cậy cũ sang mọi mạng mới**.
+- Các hồ sơ mới nằm ở `data/networks/<id>.db`, tách theo Network List Manager của Windows, card, subnet/gateway và nhãn bổ sung. Tên, ghi chú, tin cậy, baseline, cảnh báo và lịch sử đều ở đúng hồ sơ.
+- Nếu Windows không cung cấp hồ sơ, ứng dụng yêu cầu đặt nhãn riêng qua cài đặt thay vì âm thầm dùng chung mạng. Nhãn dự phòng cần được người dùng đổi khi đổi sang mạng khác mà Windows vẫn không định danh được.
+- Nâng cấp schema có version, giữ dữ liệu cũ và tạo bản sao `.pre-v3.bak` trước khi nâng cấp CSDL có dữ liệu. Bản sao và file đang dùng không đưa vào Git.
+- Lưu riêng quan sát IP-MAC, kể cả nhiều MAC cùng nhận IP hoặc một MAC có nhiều IP. Không áp UNIQUE IP toàn cục.
+- Ping lưu address, session và trạng thái `ok`, `timeout`, `measurement_error`, `offline`, `unavailable`. Lỗi đo/không có dữ liệu không được tính thành mất gói 0% hoặc 100%.
+- Mặc định giữ lịch sử chi tiết 30 ngày; bảo trì khi mở hồ sơ và theo giờ lúc theo dõi. Giữ metadata người dùng và trạng thái biên cần thiết. Hồ sơ không theo dõi không bị tự mở để xóa dữ liệu.
+- Mỗi hồ sơ có ngân sách 10.000 thiết bị đã biết; mỗi lượt tối đa 4.096 claim, detector có giới hạn TTL/số mục và cảnh báo có ngân sách tổng thể. Vượt ngân sách làm lượt lỗi rõ ràng, không nhận một phần rồi suy ra Offline.
+- Thời gian hiển thị/lưu trữ là GMT+7. API nhận datetime có timezone sẽ chuyển về GMT+7; giữ microsecond.
+
+Nút làm mới giữ metadata của **cùng hồ sơ**. Dữ liệu cũ không bị xóa nếu danh sách của hồ sơ mới ban đầu trống: chọn hồ sơ lịch sử cũ trong Công cụ để xem lại.
+
+## Báo cáo
+
+Xuất PDF chạy nền, có hủy và ghi file hoàn tất bằng thay thế nguyên tử; lỗi không ghi đè bản báo cáo trước. Chọn khoảng tối đa 31 ngày. SQL có cả hai cận thời gian; thống kê đọc qua snapshot riêng, không giữ khóa UI/writer trong suốt lúc dựng báo cáo.
+
+PDF dùng metadata của phiên đã đo, không lấy card đang kết nối tại lúc xuất. Liệt kê phiên, trạng thái đo và số mẫu; thiếu dữ liệu hiện N/A/dấu gạch. Timeout được tổng hợp theo giờ, tối đa 500 nhóm mỗi mốc. Diagnosis/traceroute được lưu SQLite. Các khoảng ứng dụng không chạy hoặc không đo được không chứng minh có kết nối tốt.
+
+CSV bảo vệ các trường text bắt đầu bằng dấu có thể được phần mềm bảng tính hiểu thành công thức. Kết quả Wi-Fi chỉ ước lượng từ AP/tín hiệu, chưa đo channel width, tải thực hay nhiễu phổ; khi thiếu Band thì giữ Unknown, không suy ra băng tần chỉ từ số kênh.
+
+## Cài đặt và phạm vi quét
+
+Mở **Công cụ → Cài đặt** để chọn tên card, CIDR, đích ngoài, chu kỳ, ngưỡng RTT/loss, retention và nhãn hồ sơ. Cấu hình được validate tại `data/settings.json`, áp dụng khi mở lại. File cấu hình hỏng được báo rõ và dùng mặc định để vẫn mở được giao diện sửa lại.
+
+Subnet lớn hơn 1.024 host cần chọn một CIDR nhỏ nằm trong subnet đó, ví dụ một `/24`; ứng dụng không tự tăng tải quét toàn mạng lớn. Địa chỉ ngoài CIDR đã chọn không bị tính là vắng mặt. Các probe ping độc lập chạy đồng thời nhưng chu kỳ vẫn tuần tự. Cửa sổ là số mẫu có thời gian thực, không mặc định 30 mẫu luôn tương đương 60 giây.
+
+ARP không bao phủ IPv6, VLAN/thiết bị sau router hoặc client isolation. Thiết bị ngủ/im lặng có thể vắng ARP. Online/Offline là kết quả quan sát. MAC có thể bị giả mạo; ICMP không kiểm tra DNS, HTTP, captive portal hay băng thông. Quyền bắt gói hiện áp dụng cho tiến trình giám sát; chế độ lịch sử không bật các dịch vụ đó.
+
+## Thông báo Telegram/Zalo tùy chọn
+
+Mặc định tắt. Không lưu token vào mã hoặc JSON cấu hình. Chỉ bật khi chủ hệ thống muốn gửi cảnh báo ra dịch vụ đã cấu hình:
+
+- `NETGUARD_NOTIFICATIONS_ENABLED=1`.
+- Telegram: `NETGUARD_TELEGRAM_TOKEN`, `NETGUARD_TELEGRAM_CHAT_ID`.
+- Zalo OA: `NETGUARD_ZALO_ACCESS_TOKEN`, `NETGUARD_ZALO_USER_ID`; tài khoản/quyền/tương tác người nhận phải đáp ứng điều kiện của OA API.
+
+Có hàng đợi RAM tối đa 100 thông báo và tối đa 3 lần thử khi lỗi có thể thử lại. Lỗi kênh hiển thị trên UI; cảnh báo gốc còn trong CSDL. Hàng đợi chưa gửi không được bảo đảm tồn tại sau khi tắt app. Không tự refresh token OA. Zalo `dry_run=True` vẫn chỉ mô phỏng.
+
+Các adapter dựa trên [Telegram Bot API](https://core.telegram.org/bots/api#sendmessage) và [Zalo OA message API](https://stc-developers.zdn.vn/docs/v2/official-account/tin-nhan/tin-tu-van/gui-tin-tu-van-trich-dan?lang=vi). Chưa kiểm chứng gửi thật bằng tài khoản người dùng trong đợt sửa này.
+
+## CLI
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-### Thư viện sử dụng (`requirements.txt`)
-
-```
-scapy
-icmplib
-PySide6
-pyqtgraph
-reportlab
-pytest
-```
-
-| Thư viện | Vai trò |
-|---|---|
-| scapy | ARP scan, dựng và đọc gói tin (dùng Npcap bên dưới) |
-| icmplib | Ping ICMP và traceroute dự phòng trên nền tảng khác Windows |
-| PySide6 | Giao diện desktop (Qt) |
-| pyqtgraph | Biểu đồ độ trễ và mất gói theo thời gian |
-| reportlab | Xuất báo cáo PDF |
-| pytest | Chạy test |
-
-Khi mọi thứ chạy ổn, chốt phiên bản bằng `pip freeze > requirements.txt` để cả nhóm dùng cùng bản.
-
-## 4. Kiểm tra môi trường trước khi code
-
-Chạy **trong terminal mở bằng quyền Administrator**, với venv đã kích hoạt.
-
-**Kiểm tra Scapy thấy card mạng:**
-
-```powershell
-python -c "from scapy.all import conf; print(conf.ifaces)"
-```
-
-Phải thấy card Wi-Fi hoặc Ethernet đang dùng, kèm IP và MAC. Danh sách rỗng hoặc báo lỗi tức là Npcap chưa cài đúng hoặc chưa chạy bằng Admin.
-
-**Kiểm tra ARP scan** (thay dải IP bằng mạng của bạn, ví dụ `192.168.102.0/24`):
-
-```powershell
-python -c "from scapy.all import ARP, Ether, srp; ans,_=srp(Ether(dst='ff:ff:ff:ff:ff:ff')/ARP(pdst='192.168.102.0/24'), timeout=2, verbose=0); [print(r.psrc, r.hwsrc) for _,r in ans]"
-```
-
-Phải thấy ít nhất router và các thiết bị đang bật. Đối chiếu với `arp -a` hoặc Wireshark (lọc `arp`).
-
-**Kiểm tra ICMP:**
-
-```powershell
-python -c "from icmplib import ping; r=ping('1.1.1.1', count=4); print(r.avg_rtt, r.packet_loss)"
-```
-
-## 5. Chạy ứng dụng
-
-Để mở giao diện, nhấp đúp **`Mo_NetGuard.cmd`** trong thư mục dự án, rồi bấm **Yes**
-ở hộp thoại cấp quyền Windows. Launcher tự chọn Python trong `.venv`; không phải gõ lệnh.
-Chọn **No** sẽ hủy mở ứng dụng, không hỏi quyền lặp lại.
-
-Nếu dùng terminal thường, `python main.py` cũng tự chọn môi trường `.venv` của dự án
-và xin quyền khi cần. Không cần mở lại terminal bằng Administrator cho chế độ GUI.
-
-Các lệnh **CLI** bên dưới vẫn cần terminal Administrator khi gửi/nhận gói mạng thô.
-Kích hoạt venv:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Các chế độ CLI hiện có:
-
-~~~powershell
-python main.py --cli scan
-python main.py --cli monitor
-python main.py --cli baseline
-python main.py --cli trace 1.1.1.1
-python main.py --cli diagnose
-~~~
-
-monitor chạy liên tục đến Ctrl+C. Lần đầu, để chương trình nhận diện thiết bị hiện có,
-sau đó mở terminal thứ hai và chạy `python main.py --cli baseline`. Sau khi chốt baseline,
-thiết bị mới chưa tin cậy sẽ bị cảnh báo.
-
-Giao diện đã có trong `ui/main_window.py` và `ui/tray.py`
-của HuyTien trên nhánh `feature/gui-monitor`. Xem cách mở ở mục 5.4.
-
-Windows `tracert.exe` gửi ba probe cho mỗi TTL; thời gian chờ có thể dài khi nhiều hop không
-trả lời. Tắt VPN như CloudflareWARP trước khi đối chiếu traceroute.
-
-**Chạy test:**
-
-```powershell
-python -m pytest -q
-```
-
-### 5.1. Kiểm tra khi tắt và bật lại mạng
-
-Mở PowerShell bằng quyền Administrator, kích hoạt `.venv`, sau đó chạy:
-
-```powershell
-python main.py --cli diagnose
-```
-
-Tắt Wi-Fi hoặc rút cáp mạng trong khi lệnh đang chạy. Chương trình báo máy mất
-kết nối LAN và tiếp tục chờ. Bật Wi-Fi/cắm cáp lại: chương trình tự đọc lại IP,
-mặt nạ và gateway mỗi chu kỳ ping (khoảng 2 giây), rồi thu thập mẫu mới để chẩn đoán.
-Nếu card có IP nhưng thiếu gateway, chương trình báo rõ `không có gateway`.
-Lỗi tạo/gửi socket được hiển thị là `lỗi đo`, không được ghi thành mất gói 100%.
-Các kết luận dựa trên ping cần ít nhất 10 mẫu và giữ ổn định 3 chu kỳ.
-
-Với lệnh theo dõi thiết bị:
-
-```powershell
-python main.py --cli monitor
-```
-
-Chương trình đọc lại cấu hình card ở mỗi chu kỳ quét (30 giây), mở lại bộ nghe ARP
-khi cấu hình thay đổi và tự quét tiếp khi kết nối trở lại. Một lần quét lỗi không
-được dùng để kết luận tất cả thiết bị đã offline. Các lệnh `monitor` và `diagnose`
-có thể khởi động khi chưa kết nối LAN; quyền Administrator và Npcap vẫn cần thiết.
-Sau khi chọn được card, các lệnh CLI tiếp tục theo dõi card đó. Muốn đổi sang card
-khác trong CLI, dừng bằng Ctrl+C và chạy lại lệnh. Trên GUI, dùng nút **Làm mới mạng**
-để chọn lại kết nối đang hoạt động mà không phải đóng ứng dụng.
-
-Các lệnh chạy một lần như `scan` hoặc `trace` báo lỗi rõ khi chưa kết nối; cần chạy
-lại sau khi có mạng. Traceroute ra Internet cần gateway. Nếu chỉ ngắt đường Internet
-của router trong khi máy vẫn nối Wi-Fi, router vẫn có thể ping được; đây là tình
-huống khác với tắt card Wi-Fi của máy.
-
-### 5.2. Chạy các tính năng phụ
-
-Chạy từ thư mục gốc dự án trong PowerShell:
-
-```powershell
-cd D:\Nhom8_LapTrinhMang
-.\.venv\Scripts\Activate.ps1
-```
-
-**Quét Wi-Fi xung quanh và gợi ý kênh 2.4 GHz:**
-
-```powershell
-python -m extras.wifi_channels
-```
-
-Tính năng dùng `netsh wlan show networks mode=bssid` trên Windows. Cần bật card
-Wi-Fi; không bắt buộc có Internet. Nếu Windows chặn quét, kiểm tra dịch vụ WLAN
-AutoConfig và quyền truy cập vị trí trong Settings. Khi không quét được hoặc không
-có dữ liệu 2.4 GHz, chương trình báo chưa đủ dữ liệu và không đề xuất mặc định kênh 1.
-Khi có dữ liệu, gợi ý chọn trong các kênh 1, 6, 11 dựa trên tín hiệu và độ chồng lấn;
-đây là ước lượng, không tự đổi kênh trên router.
-
-**Mô phỏng trùng IP, thiết bị mới và thiết bị mất kết nối:**
-
-```powershell
-python tests/simulate/simulate_network.py
-```
-
-Lệnh dùng dữ liệu giả, chạy được khi offline và không gửi gói tin mạng.
-
-**Demo nội dung cảnh báo Zalo:**
-
-```powershell
-python -m extras.zalo_notify
-```
-
-Lệnh chỉ in cảnh báo mẫu ra terminal, chạy được khi offline. Chưa tích hợp Zalo
-Official Account API nên **chưa gửi tin nhắn Zalo thật** và chưa tự nối vào luồng
-cảnh báo của `monitor`. Hàm `send_zalo_alert(..., dry_run=False)` trả trạng thái
-`not_configured`, không báo gửi thành công.
-
-### 5.3. Chạy kiểm thử
-
-Các bài test dưới đây dùng dữ liệu giả/mô phỏng, không cần Internet hay quyền Admin.
-
-```powershell
-# Quy tắc chẩn đoán mạng (12 test)
-python -m pytest tests/test_diagnosis.py -v
-
-# Mô phỏng mạng (4 test)
-python -m pytest tests/test_simulate_network.py -v
-
-# Demo cảnh báo Zalo (4 test)
-python -m pytest tests/test_zalo_notify.py -v
-
-# Chạy chung 20 test trong tài liệu DTG1
-python -m pytest tests/test_diagnosis.py tests/test_simulate_network.py tests/test_zalo_notify.py -v
-
-# Hồi quy mất/kết nối lại mạng và quét kênh Wi-Fi
-python -m pytest tests/test_network_recovery.py tests/test_wifi_channels.py -v
-
-# Toàn bộ test, gồm cả các tình huống hồi quy mới
-python -m pytest -q
-```
-
-Các bài test tự động không thay thế bước kiểm tra tắt/bật card thật ở mục 5.1.
-
-### 5.4. Mở giao diện NetGuard
-
-Nhấp đúp **`Mo_NetGuard.cmd`** rồi chọn **Yes** ở hộp thoại cấp quyền của Windows.
-Không cần chuột phải “Run as administrator”, mở PowerShell hay kích hoạt môi trường.
-Ứng dụng tự xin quyền một lần cho mỗi lần mở; nếu đã có quyền thì mở thẳng giao diện.
-File chạy được cả khi thư mục dự án có dấu cách hoặc chữ tiếng Việt.
-
-Hoặc dùng PowerShell/terminal **thường** và chạy:
-
-```powershell
-cd D:\Nhom8_LapTrinhMang
-
-.\.venv\Scripts\python.exe main.py
-```
-
-Khi mở GUI từ một thư mục khác, ứng dụng vẫn dùng dữ liệu của thư mục dự án.
-Nếu khởi động lỗi trước khi nạp được giao diện, chương trình hiện hộp thoại và lưu
-chi tiết vào `logs/startup.log` để dễ kiểm tra. Nếu báo thiếu `.venv`, xem lại bước
-cài đặt ở mục 3. Windows vẫn cần bạn chấp thuận UAC vì chức năng mạng sử dụng quyền cao.
-
-UI hiển thị card mạng, IPv4/mặt nạ và gateway. Thiết bị lấy
-từ quét ARP; các mẫu RTT/mất gói và kết luận lấy từ dịch vụ ICMP. Không tự sinh
-thiết bị, cảnh báo hoặc kết luận bình thường khi chưa đo được. Thiếu dữ liệu sẽ
-hiện trạng thái chờ hoặc lỗi đo. Vẫn cần Npcap và quyền Administrator; nếu chưa nối
-LAN, cửa sổ mở để chờ mạng và tự đo khi kết nối lại.
-
-`python -m ui.main_window` và `python ui/main_window.py` cũng mở giao diện qua cùng
-đường khởi động. UI không còn chế độ demo hoặc tham số `--fake`.
-
-Các thiết bị từ CSDL cũ hiện **Chưa xác minh trong phiên** cho đến khi được quan
-sát trong phiên hiện tại. Khi mất LAN, trạng thái hiển thị là chưa xác minh thay
-vì coi các trạng thái Online đã lưu là dữ liệu đang đo. Cột **Thấy gần nhất** và
-đồ thị **lịch sử 30 phút** cho biết thời điểm của dữ liệu. Dừng ứng dụng cũ rồi mở
-lại để nạp mã mới.
-
-Không thêm `--cli` khi muốn mở cửa sổ. Đóng bằng nút **X** sẽ ẩn cửa sổ xuống khay
-hệ thống. Nhấp phải biểu tượng NetGuard cạnh đồng hồ, chọn **Mở NetGuard** để hiện
-lại hoặc **Thoát** để kết thúc ứng dụng. Có thể cần bấm dấu mũi tên ở khay để thấy
-biểu tượng; bản UI này dùng biểu tượng theo theme nên trên một số máy biểu tượng
-có thể không hiển thị rõ.
-
-| Phần giao diện | Chức năng đã nối | Giới hạn hiện tại |
-|---|---|---|
-| Thiết bị | Tên dễ đọc, loại gợi ý, hãng/card mạng, Online/Offline hoặc chưa xác minh, tin cậy, ghi chú; xem MAC/IP và nguồn nhận diện trong Chi tiết | Loại gợi ý chưa phải xác minh phần cứng; có thể xác nhận loại thủ công |
-| Cảnh báo | Danh sách 20 cảnh báo gần nhất, màu mức độ và thông báo qua khay hệ thống | Chưa có bộ lọc, tìm kiếm hoặc gửi Zalo trên UI |
-| Chẩn đoán | Nhận đúng kết luận từ backend; bảng địa chỉ đích, RTT mới nhất, mất gói của 30 mẫu lịch sử và lỗi đo; đồ thị RTT lịch sử 30 phút | Không tự kết luận `ok` từ bản ghi cũ hoặc khi chưa đủ mẫu; chưa có biểu đồ mất gói riêng |
-| Báo cáo | Chọn khoảng thời gian và đường dẫn lưu PDF, gọi `extras/pdf_report.py` | Cần cài đủ thư viện xuất báo cáo, gồm ReportLab và Matplotlib |
-| Khay hệ thống | Ẩn, mở lại, thoát và hiện thông báo | Không phải gửi thông báo Zalo |
-
-Các chức năng lõi chưa có nút riêng trên UI: traceroute, chốt baseline, lịch sử
-online/offline từng thiết bị, xuất CSV, quét kênh Wi-Fi và demo Zalo. Đánh dấu
-**Tin cậy tất cả** chỉ thay đổi cờ tin cậy, không gọi `finish_baseline()`.
-Để chốt baseline cho chế độ mạng thật sau khi đã quét đủ thiết bị, mở PowerShell khác:
-
-```powershell
+.\.venv\Scripts\python.exe main.py --cli scan
+.\.venv\Scripts\python.exe main.py --cli monitor
 .\.venv\Scripts\python.exe main.py --cli baseline
+.\.venv\Scripts\python.exe main.py --cli diagnose
+.\.venv\Scripts\python.exe main.py --cli trace 1.1.1.1
+.\.venv\Scripts\python.exe -m db.database
 ```
 
-Hãng card mạng được tra ngoại tuyến bằng dữ liệu đóng gói trong Scapy cùng các mục
-bổ sung ở `data/oui.csv`. MAC riêng tư/cục bộ không được gán hãng từ tiền tố.
-Tên/ghi chú do người dùng đặt và lịch sử đã lưu vẫn được giữ nguyên.
+CLI bắt gói cần quyền thích hợp. Lệnh demo CSDL cuối cùng chỉ dùng CSDL tạm riêng, không dọn dữ liệu đang dùng theo mốc thời gian.
 
-### 5.5. Làm mới mạng ngay trên giao diện
+## Kiểm thử và Git
 
-Bấm **Làm mới mạng** trên thanh công cụ, cạnh nút **Tin cậy**. Ứng dụng sẽ đọc lại
-card đang hoạt động, IP/mặt nạ/gateway, quét thiết bị và lấy các mẫu đo kết nối mới.
-Có thể dùng sau khi đổi Wi-Fi, chuyển Wi-Fi/Ethernet hoặc khi muốn kiểm tra lại ngay.
-
-- Trong lúc thực hiện, nút chuyển thành **Đang làm mới…** và tạm khóa. Nếu đang có
-  lượt quét/đo, yêu cầu chờ lượt đó kết thúc rồi thực hiện trên cùng dịch vụ nền.
-- Dòng bên dưới thông tin kết nối báo thời điểm hoàn tất hoặc lỗi cụ thể. Có thể
-  thử lại sau khi kết nối trở lại. Quét lỗi không được tính là một lượt thiết bị vắng mặt.
-- Tên, ghi chú, cờ tin cậy và lịch sử trong CSDL được giữ lại. Thiết bị cũ vẫn có
-  trong danh sách đã biết; những thiết bị thấy trong lượt mới được xác minh lại.
-- Các mẫu thống kê chẩn đoán trong bộ nhớ được thu thập lại; lịch sử đã lưu không bị xóa.
-  Tab Chẩn đoán chờ đủ mẫu trước khi đưa ra kết luận mới. Việc tìm hop ISP tiếp tục ở nền.
-- Nếu kết nối thay đổi trong lúc làm mới, ứng dụng yêu cầu thử lại để tránh xác nhận
-  kết quả quét của kết nối khác. Nút này không tự kết nối hoặc đổi Wi-Fi trong Windows.
-
-Giới hạn subnet lớn hiện vẫn áp dụng: mạng vượt 1.024 host sẽ báo lỗi quét trên dòng
-làm mới. Việc mở rộng phạm vi quét và tách lịch sử theo mạng là các phần sửa tiếp theo.
-
-### 5.6. Nhận diện thiết bị bằng hãng, tên và dịch vụ
-
-Bảng thiết bị hiển thị tên dễ hiểu và loại thiết bị thay cho việc lấy IP làm tên.
-**Máy tính này** là máy đang chạy NetGuard; router/gateway được nhận diện theo kết nối.
-
-- Tra hãng/card mạng ngoại tuyến từ hơn 50.000 prefix MAC trong môi trường hiện tại.
-  Hãng linh kiện như Intel có thể khác hãng sản xuất cả chiếc máy.
-- Thu thập bổ sung tên/model/dịch vụ công bố trong LAN qua mDNS/DNS-SD và NetBIOS ở nền.
-  Tên/loại có thể cập nhật thêm sau khi lượt quét hoàn tất.
-- Các loại suy luận có chữ **gợi ý**. MAC riêng tư/cục bộ hoặc thiếu phản hồi có thể
-  vẫn hiện **Chưa xác định**; không tự kết luận điện thoại/laptop chỉ dựa vào tên hãng.
-- Chọn thiết bị, bấm **Chi tiết / Sửa tên** để xem nguồn nhận diện, model, MAC/IP,
-  đặt tên gợi nhớ và **Xác nhận loại thiết bị**. Chọn **Tự nhận diện** để bỏ loại thủ công.
-- Bật **Hiện MAC / IP** khi cần hiện địa chỉ trong bảng. Tên, ghi chú, tin cậy và
-  loại đã xác nhận được giữ sau khi làm mới hoặc mở lại ứng dụng.
-
-Ứng dụng chỉ hỏi trong LAN, không gửi MAC tới dịch vụ tra cứu trên Internet.
-Xem [phương pháp, giới hạn và cách kiểm tra nhận diện](docs/device-identification.md).
-
-## 6. Lỗi thường gặp
-
-
-| Triệu chứng | Nguyên nhân | Cách xử lý |
-|---|---|---|
-| Danh sách card rỗng, hoặc báo thiếu `wpcap.dll` | Chưa cài Npcap, hoặc cài lỗi | Cài lại Npcap, restart máy |
-| Quét không ra thiết bị nào | Chưa chạy Admin, chọn nhầm card, hoặc Wi-Fi bật client isolation | Mở terminal bằng Admin; chọn card Wi-Fi/Ethernet thật; thử mạng khác |
-| Chỉ thấy router | Client isolation hoặc mạng khách | Dùng mạng nhà, không dùng Wi-Fi công cộng |
-| Chọn nhầm card | Máy có VPN, VMware, VirtualBox sinh card ảo (`Local Area Connection*`, `CloudflareWARP`...) | Chọn card có IP cùng dải với router; tắt VPN khi test |
-| Ping và traceroute cho kết quả lạ | VPN (CloudflareWARP) đang bật | Tắt VPN |
-| `Activate.ps1` bị chặn | Chính sách thực thi của PowerShell | Lệnh `Set-ExecutionPolicy` ở mục 3 |
-| `ModuleNotFoundError` | Chưa kích hoạt venv hoặc chưa `pip install` | Kích hoạt venv rồi cài lại |
-
-## 7. Cấu trúc thư mục dự kiến
-
-```
-├─ main.py            # điểm vào
-├─ models.py          # Device, PingResult, Alert, Diagnosis
-├─ config.py          # ngưỡng cảnh báo, chu kỳ quét
-├─ core/              # ARP scan, ICMP, traceroute, kết luận chẩn đoán
-├─ services/          # quét định kỳ, ping liên tục, baseline, cảnh báo
-├─ db/                # SQLite
-├─ ui/                # giao diện PySide6
-├─ extras/            # OUI, nhận diện MAC ngẫu nhiên, kênh Wi-Fi, CSV, PDF
-├─ data/              # oui.csv
-├─ tests/
-└─ docs/
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m pytest --cov -q
 ```
 
-## 8. Quy ước làm việc với Git
+Mọi test có CSDL riêng và tắt thông báo ra ngoài. Các bài mạng dùng I/O giả; không mặc nhiên chứng minh tương thích mọi Windows/Npcap hoặc tải dài hạn. GitHub Actions kiểm tra cài mới trên Windows/Python 3.12.
 
-- Mỗi người chỉ sửa trong thư mục được giao. `models.py` chỉ nhóm trưởng sửa.
-- Trước khi làm: `git pull` trên `main`, rồi tạo nhánh mới (`git checkout -b ten-nhanh`).
-- Xong việc: `git push` nhánh của mình rồi báo nhóm trưởng merge. Không ghi thẳng vào `main`.
-- Không commit file `.venv/`, `__pycache__/`, `*.db`.
+Cache `.presentation-build`, `node_modules`, DB, WAL/SHM, backup, token và log không đưa vào commit mới. Mã công cụ slide cũ được tách ở `tools/presentations/` với manifest/lock; không cần nó để chạy NetGuard. Việc bỏ track không xóa file trên máy hoặc xóa các file đã có trong **lịch sử Git**.
 
-## 9. Lưu ý
-
-- Chỉ quét mạng của mình hoặc mạng được cho phép.
-- Chương trình chỉ **cảnh báo**, không chặn hay đuổi thiết bị.
-- Thử ARP spoofing hoặc trùng IP chỉ làm trong máy ảo của nhóm.
+`git push` chỉ đẩy commit. Nếu mã còn `M`/`??` trong `git status` và HEAD chưa có commit mới thì push vẫn báo Everything up-to-date. Báo cáo rà soát gốc: `docs/code-review-2026-11-11.md`; kết quả sửa hiện tại: `docs/remediation-report-2026-11-12.md`.

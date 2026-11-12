@@ -95,7 +95,7 @@ def test_missing_gateway_is_reported_immediately(iface, saved_pings):
     assert monitor.target_status['router'] == 'không có gateway'
     assert cycles == [dict.fromkeys(('router', 'isp', 'external'))]
     pinger.assert_not_called()
-    assert not saved_pings
+    assert {sample.status for sample in saved_pings} == {"unavailable"}
 
 
 def test_socket_failure_does_not_count_as_packet_loss(iface, saved_pings):
@@ -106,7 +106,8 @@ def test_socket_failure_does_not_count_as_packet_loss(iface, saved_pings):
         raise RuntimeError('source address unavailable')
     monitor = PingMonitor(interface_resolver=lambda: iface, pinger=pinger, on_cycle=cycles.append)
     monitor._cycle()
-    assert [item.target for item in saved_pings] == ['router']
+    assert [item.target for item in saved_pings if item.status == 'ok'] == ['router']
+    assert saved_pings[-1].status == 'measurement_error'
     assert not monitor._history['external']
     assert cycles[-1]['external'] is None
     assert 'lỗi đo' in monitor.target_status['external']
@@ -115,8 +116,10 @@ def test_socket_failure_does_not_count_as_packet_loss(iface, saved_pings):
 def test_actual_ping_timeout_still_counts_as_packet_loss(iface, saved_pings):
     monitor = PingMonitor(interface_resolver=lambda: iface, pinger=lambda address, timeout: None)
     monitor._cycle()
-    assert len(saved_pings) == 2
-    assert all(item.rtt_ms is None and item.loss_pct == 100 for item in saved_pings)
+    assert len(saved_pings) == 3
+    probes = [item for item in saved_pings if item.status == "timeout"]
+    assert len(probes) == 2
+    assert all(item.rtt_ms is None and item.loss_pct == 100 for item in probes)
 
 
 def test_offline_start_recovers_then_detects_another_disconnect(iface, saved_pings):
@@ -187,14 +190,14 @@ def test_scan_refreshes_card_and_preserves_devices_on_failure(monkeypatch, iface
     changed = []
     monkeypatch.setattr('services.scan_loop.repository.list_devices', lambda: [])
     loop = ScanLoop(iface=iface, interface_resolver=Mock(side_effect=[
-        iface, RuntimeError('offline'), updated,
+        iface, iface, RuntimeError('offline'), updated, updated,
     ]), scanner=scanner, on_interface=changed.append)
     loop.scan_once()
-    mark_offline = Mock()
-    monkeypatch.setattr(loop, '_mark_offline', mark_offline)
+    save_scan = Mock(wraps=loop._save_scan)
+    monkeypatch.setattr(loop, '_save_scan', save_scan)
     with pytest.raises(RuntimeError, match='offline'):
         loop.scan_once()
-    mark_offline.assert_not_called()
+    save_scan.assert_not_called()
     loop.scan_once()
     assert changed == [iface, None, updated]
     assert [call.args[0] for call in scanner.call_args_list] == [iface, updated]

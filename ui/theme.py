@@ -221,6 +221,6 @@ class LightTableDelegate(QStyledItemDelegate):
                 event.type() == QEvent.KeyPress and event.key() == Qt.Key_Space
             ):
                 checked = index.data(Qt.CheckStateRole) == Qt.Checked.value
-                return model.setData(index, Qt.Unchecked if checked else Qt.Checked, Qt.CheckStateRole)
+                return model.setData(index, Qt.Unchecked.value if checked else Qt.Checked.value, Qt.CheckStateRole)
             return False
         return super().editorEvent(event, model, option, index)

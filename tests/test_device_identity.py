@@ -178,7 +178,7 @@ def test_background_identity_is_cached_and_manual_refresh_bypasses_cache(isolate
         assert discover.call_count == 2
         saved = repository.get_device(entry.mac)
         assert (saved.name, saved.note, saved.trusted, saved.online, saved.last_seen) == (
-            before.name, before.note, True, False, before.last_seen.replace(microsecond=0),
+            before.name, before.note, True, False, before.last_seen,
         )
     finally:
         worker.stop()
@@ -283,7 +283,7 @@ def test_backend_enriches_devices_through_its_real_scan_pipeline(monkeypatch, is
     monkeypatch.setattr("core.interfaces.get_active_interface", resolve)
     monkeypatch.setattr("services.scan_loop.get_active_interface", resolve)
     monkeypatch.setattr("services.ping_monitor.get_active_interface", resolve)
-    monkeypatch.setattr("services.scan_loop.scan_subnet", lambda chosen: [entry])
+    monkeypatch.setattr("services.scan_loop.scan_subnet", lambda chosen, **kwargs: [entry])
     monkeypatch.setattr("services.ping_monitor.ping_once", lambda *a, **k: 3)
     monkeypatch.setattr("services.ping_monitor.trace", lambda *a, **k: [])
     monkeypatch.setattr("core.arp_listener.ArpListener", Mock())
@@ -297,8 +297,8 @@ def test_backend_enriches_devices_through_its_real_scan_pipeline(monkeypatch, is
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             app.processEvents()
-            saved = repository.get_device(entry.mac)
-            if saved and saved.device_type == "mobile" and window.device_table.item(0, Col.NAME).text() == "iPhone của Mẹ":
+            saved = next((d for d in backend.list_devices() if d.mac == entry.mac), None)
+            if saved and saved.device_type == "mobile" and window.device_table.item(0, Col.NAME) and window.device_table.item(0, Col.NAME).text() == "iPhone của Mẹ":
                 break
             time.sleep(0.01)
         else:

@@ -1,13 +1,13 @@
 # Tiến độ thực hiện theo từng bước
 
-Theo yêu cầu của người dùng: hoàn tất từng mục, dừng để người dùng kiểm tra, chỉ chuyển sang mục tiếp theo sau khi người dùng đồng ý.
+Yêu cầu ban đầu: dừng sau từng mục. Yêu cầu cập nhật: sửa tiếp toàn bộ các nhóm trong báo cáo rồi báo cáo tổng hợp một lần; không còn mốc chờ duyệt từng lỗi.
 
 | Mục | Công việc | Trạng thái |
 |---|---|---|
 | 1 | Mở ứng dụng dễ hơn, không phải tự mở PowerShell Administrator | Người dùng đã xác nhận và cho tiếp tục mục 2 |
 | 2 | Nút làm mới mạng/dữ liệu theo yêu cầu | Người dùng đã cho tiếp tục mục 3 |
-| 3 | Nhận diện thiết bị dễ hiểu từ MAC, hãng và các nguồn thông tin bổ sung | Đã triển khai, kiểm thử và kiểm tra bố cục; chờ người dùng kiểm tra thực tế |
-| 4 | Xử lý từng nhóm vấn đề trong báo cáo rà soát | Chưa thực hiện; mỗi nhóm là một lượt kiểm tra riêng |
+| 3 | Nhận diện thiết bị dễ hiểu từ MAC, hãng và các nguồn thông tin bổ sung | Người dùng đã đồng ý bắt đầu sửa từng lỗi |
+| 4 | Xử lý từng nhóm vấn đề trong báo cáo rà soát | Đã triển khai đợt sửa tổng thể; xem docs/remediation-report-2026-11-12.md |
 
 ## Mục 1 — Cách chạy
 
@@ -51,4 +51,20 @@ Chưa thử thao tác với mạng thật trong lượt triển khai này. Ngư�
 
 Kiểm chứng: **145 test pass**, gồm 55 test mới của mục 3. Đã kiểm tra dữ liệu OUI thật được đóng gói, parser/socket giả, dữ liệu CSDL cũ, worker/cache/hủy, lựa chọn thủ công, UI và luồng `Backend.start()` thực tế với I/O giả. Đã render bảng và hộp thoại chi tiết bằng Qt offscreen. Chưa gửi gói khám phá lên mạng thật trong lần triển khai này.
 
-Chi tiết: `docs/device-identification.md`. Nhóm 36 trong báo cáo (bảng OUI chỉ có hai prefix) được xử lý trong phạm vi mục này. Các nhóm khác vẫn được theo dõi riêng; chưa bắt đầu mục 4. Sau khi người dùng xác nhận mục 3, xử lý lỗi 01 (scan có thể coi lỗi capture là thành công) trước và dừng để kiểm tra từng lỗi.
+Chi tiết: `docs/device-identification.md`. Nhóm 36 trong báo cáo (bảng OUI chỉ có hai prefix) được xử lý trong phạm vi mục này. Người dùng đã đồng ý bắt đầu mục 4; sau đó người dùng yêu cầu hoàn tất toàn bộ và báo cáo một lần.
+
+## Mục 4 — Lỗi 01: không coi capture hỏng là quét thành công
+
+Trước bản sửa, lỗi mở bộ bắt gói trong luồng `AsyncSniffer` có thể bị bỏ qua; scanner vẫn trả về chính máy này và khiến các thiết bị khác bị tính là vắng mặt. Đã tái hiện bằng một test thất bại trên mã cũ trước khi sửa.
+
+- Chờ `started_callback` xác nhận bộ bắt gói sẵn sàng trước khi gửi ARP, thay khoảng ngủ cố định 0,8 giây. Thời hạn khởi tạo tối đa 3 giây.
+- Kiểm tra lỗi của luồng nền và trường hợp capture tự dừng không có ngoại lệ; ngừng lượt quét khi bắt gói hỏng. Chờ phản hồi bằng `join(timeout)` để nhận lỗi ngay khi luồng kết thúc.
+- Dừng và chờ đóng capture có thời hạn 1 giây; lỗi đóng hoặc chưa dừng xong đều làm lượt quét thất bại. Giữ lỗi gốc nếu đồng thời có lỗi dọn dẹp. Capture mở xong sau thời hạn khởi tạo sẽ tự nhận yêu cầu dừng qua callback; không thể cưỡng bức kết thúc một lời gọi driver bị treo vĩnh viễn trong Python.
+- Chỉ trả dữ liệu sau khi hoàn tất kiểm tra và dừng. Lượt lỗi không thêm thiết bị, không cập nhật `last_seen`/lịch sử hiện diện và không tăng bộ đếm vắng mặt. Capture khỏe nhưng không có thiết bị nào trả lời vẫn là lượt quét hợp lệ.
+- Thông báo thiếu quyền hướng dẫn mở `Mo_NetGuard.cmd` theo cách chạy mới.
+
+Kiểm chứng: **162 test pass**, gồm **17 test mới** trong `tests/test_arp_scanner.py`. Dùng luồng/bao ngoại lệ thật của Scapy với I/O giả, kiểm tra lỗi khởi tạo, readiness trễ/thiếu, lỗi đọc, tự dừng, lỗi gửi/đóng, timeout và tình huống capture chết đúng lúc chuẩn bị dừng. Bốn kịch bản tích hợp với `ScanLoop` và SQLite tạm chứng minh nhiều lượt lỗi liên tiếp vẫn giữ dữ liệu/bộ đếm, rồi quét lại thành công khi capture phục hồi. Không gửi gói mạng thật hoặc ghi dữ liệu thử vào CSDL đang sử dụng.
+
+Để kiểm tra thực tế: chọn **Thoát** ở khay hệ thống của bản cũ, mở lại bằng `Mo_NetGuard.cmd`, bấm **Làm mới mạng** và kiểm tra danh sách thiết bị. Các tình huống lỗi driver đã được kiểm thử giả lập, chưa xác nhận trên Npcap thật trong lượt sửa này.
+
+**Cập nhật 12/11/2026:** mốc dừng sau lỗi 01 đã được người dùng thay đổi. Listener, phạm vi dữ liệu, cảnh báo, chẩn đoán, báo cáo và giao diện đã được sửa tiếp trong đợt tổng thể. Xem báo cáo sửa mã hiện tại để biết kết quả và giới hạn kiểm chứng.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from pathlib import Path
 
 
 class NetGuardTrayIcon(QSystemTrayIcon):
@@ -11,10 +12,11 @@ class NetGuardTrayIcon(QSystemTrayIcon):
         super().__init__(parent)
         self.window = window
         self._build_menu()
-        try:
-            self.setIcon(QIcon.fromTheme("network-workgroup"))
-        except Exception:
-            self.setIcon(QIcon())
+        icon = QIcon.fromTheme("network-workgroup")
+        if icon.isNull():
+            icon = QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "netguard.svg"))
+        self.setIcon(icon)
+        self.activated.connect(lambda reason: self._show_window() if reason == QSystemTrayIcon.DoubleClick else None)
         self.setToolTip("NetGuard")
 
     def _build_menu(self) -> None:
@@ -41,8 +43,8 @@ class NetGuardTrayIcon(QSystemTrayIcon):
             app.quit()
 
     def notify(self, title: str, message: str, level: str = "info") -> None:
-        color = "#2e7d32" if level == "info" else "#f9a825" if level == "warning" else "#b71c1c"
-        self.showMessage(title, message, QIcon(), 3000)
+        icon = QSystemTrayIcon.Information if level == "info" else QSystemTrayIcon.Warning if level == "warning" else QSystemTrayIcon.Critical
+        self.showMessage(title, message, icon, 3000)
         self.setToolTip(f"NetGuard - {level.upper()}\n{message}")
 
     def show_status(self, message: str) -> None:

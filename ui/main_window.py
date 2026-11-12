@@ -14,7 +14,7 @@ if __name__ == "__main__":
 from models import now
 from html import escape
 
-from PySide6.QtCore import QDateTime, Qt, Slot
+from PySide6.QtCore import QDateTime, Qt, Slot, QTimer, QTimeZone
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
     QDialog,
+    QDoubleSpinBox,
+    QSpinBox,
+    QScrollArea,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -33,6 +36,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
+    QInputDialog,
     QMessageBox,
     QPushButton,
     QSizePolicy,
@@ -133,6 +138,13 @@ class MainWindow(QMainWindow):
         apply_light_theme(QApplication.instance())
         self._device_rows: dict[str, int] = {}
         self._refreshing = False
+        self._device_cache = {}
+        self._device_timer = QTimer(self)
+        self._device_timer.setSingleShot(True)
+        self._device_timer.timeout.connect(self.refresh_devices)
+        self._diagnosis_timer = QTimer(self)
+        self._diagnosis_timer.setSingleShot(True)
+        self._diagnosis_timer.timeout.connect(self.refresh_diagnosis)
         self._network_refresh_running = False
         self._network_refresh_request_id = 0
         self._latest_diagnosis = backend.get_latest_diagnosis()
@@ -271,8 +283,12 @@ class MainWindow(QMainWindow):
         self.backend.ping_result.connect(self.on_ping_result)
         self.backend.connection_changed.connect(self.on_connection_changed)
         self.backend.measurement_changed.connect(self.on_measurement_changed)
-        self.backend.devices_refreshed.connect(self.refresh_devices)
+        self.backend.devices_refreshed.connect(self.schedule_devices)
         self.backend.network_refresh_changed.connect(self.on_network_refresh_changed)
+        self.backend.service_status_changed.connect(self.on_service_status)
+        self.backend.report_finished.connect(self.on_report_finished)
+        self.backend.utility_finished.connect(self.report_text.setPlainText)
+        self.backend.traceroute_done.connect(lambda hops: self.report_text.setPlainText("Traceroute (hop quan sát, chưa xác minh ISP):\n" + "\n".join(f"{h.ttl}: {h.ip or '*'} - {h.rtt_ms if h.rtt_ms is not None else 'N/A'} ms" for h in hops)))
 
     @Slot()
     def request_network_refresh(self) -> None:
@@ -302,6 +318,8 @@ class MainWindow(QMainWindow):
         self.refresh_status_label.setVisible(bool(message))
         tone = "pending" if running else "danger" if status.get("errors") else "success"
         self.refresh_status_label.setStyleSheet(badge_stylesheet(tone))
+        if not running and hasattr(self, "device_table"):
+            self.refresh_devices()
         if began:
             self._latest_diagnosis = None
             self._measurements = {}
@@ -319,7 +337,22 @@ class MainWindow(QMainWindow):
         self.show_network_details = QCheckBox("Hiện MAC / IP")
         self.show_network_details.toggled.connect(self._toggle_network_columns)
         options.addWidget(self.show_network_details)
+        tools = QPushButton("Công cụ")
+        menu = QMenu(tools)
+        for title, handler in (("Hoàn tất thiết lập / Bật cảnh báo", self.finish_setup),
+                               ("Xác nhận MAC router đã chọn", self.accept_gateway),
+                               ("Traceroute", self.trace_route), ("Lịch sử thiết bị đã chọn", self.show_presence),
+                               ("Xuất danh sách CSV", self.export_csv), ("Quét kênh Wi-Fi", self.show_wifi),
+                               ("Cài đặt", self.show_settings), ("Sao lưu CSDL mạng hiện tại", self.backup_database),
+                               ("Khôi phục CSDL mạng hiện tại", self.restore_database),
+                               ("Xem hồ sơ mạng / lịch sử cũ", self.select_history)):
+            menu.addAction(title, handler)
+        tools.setMenu(menu)
+        options.addWidget(tools)
         layout.addLayout(options)
+        self.baseline_label = QLabel()
+        self.baseline_label.setWordWrap(True)
+        layout.addWidget(self.baseline_label)
         self.device_table = LightTable()
         self.device_table.setObjectName("deviceTable")
         self.device_table.setColumnCount(len(Col))
@@ -346,13 +379,33 @@ class MainWindow(QMainWindow):
         self.alert_banner.setWordWrap(True)
         self.alert_banner.setStyleSheet(badge_stylesheet("success"))
         layout.addWidget(self.alert_banner)
+        filters = QHBoxLayout()
+        self.alert_search = QLineEdit()
+        self.alert_search.setPlaceholderText("Tìm cảnh báo")
+        self.alert_search.returnPressed.connect(lambda: self.change_alert_page(0, reset=True))
+        filters.addWidget(self.alert_search)
+        for label, callback in (("Trước", lambda: self.change_alert_page(-100)), ("Sau", lambda: self.change_alert_page(100)),
+                                ("Đánh dấu đã xử lý", self.acknowledge_selected_alert)):
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            filters.addWidget(button)
+        self._alert_offset = 0
+        layout.addLayout(filters)
         self.alert_list = QListWidget()
         self.alert_list.setWordWrap(True)
         self.alert_list.setSpacing(4)
         layout.addWidget(self.alert_list)
 
     def _init_diagnosis_tab(self) -> None:
-        layout = QVBoxLayout(self.diagnosis_tab)
+        outer = QVBoxLayout(self.diagnosis_tab)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        contents = QWidget()
+        scroll.setWidget(contents)
+        outer.addWidget(scroll)
+        layout = QVBoxLayout(contents)
         layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(12)
         top = QHBoxLayout()
@@ -380,25 +433,41 @@ class MainWindow(QMainWindow):
         layout.addWidget(history_caption)
 
         self.diagnosis_plot = PlotWidget()
-        self.diagnosis_plot.setMinimumHeight(120)
+        self.diagnosis_plot.setFixedHeight(210)
         if PlotWidget is not QWidget:
             self.diagnosis_plot.setBackground("#FFFFFF")
             for axis in ("left", "bottom"):
                 self.diagnosis_plot.getAxis(axis).setPen("#E3E8F0")
                 self.diagnosis_plot.getAxis(axis).setTextPen("#64748B")
         layout.addWidget(self.diagnosis_plot)
+        self.loss_plot = PlotWidget()
+        self.loss_plot.setFixedHeight(155)
+        layout.addWidget(self.loss_plot)
+        self._curves, self._loss_curves = {}, {}
+        if PlotWidget is not QWidget:
+            self.diagnosis_plot.addLegend(colCount=3, offset=(10, 5), labelTextColor="#475569", brush=(255, 255, 255, 230))
+            self.loss_plot.setBackground("#FFFFFF")
+            self.loss_plot.setLabel("left", "Mất gói", units="%")
+            self.loss_plot.setYRange(0, 100)
+            self.loss_plot.addLegend(colCount=3, offset=(10, 5), labelTextColor="#475569", brush=(255, 255, 255, 230))
+            for target, label, color in (("router", "Router", "#2563EB"), ("isp", "Hop sau gateway", "#C2410C"), ("external", "Đích ngoài", "#15803D")):
+                self._curves[target] = self.diagnosis_plot.plot([], [], pen=color, name=label, connect="finite")
+                self._loss_curves[target] = self.loss_plot.plot([], [], pen=color, name=label, connect="finite")
 
     def _init_report_tab(self) -> None:
         layout = QVBoxLayout(self.report_tab)
         layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(16)
         form = QFormLayout()
-        self.start_time = QDateTimeEdit(QDateTime.currentDateTime())
-        self.end_time = QDateTimeEdit(QDateTime.currentDateTime())
+        initial = QDateTime.fromString(now().isoformat(timespec="seconds") + "+07:00", Qt.ISODate)
+        self.start_time = QDateTimeEdit(initial.addSecs(-3600))
+        self.end_time = QDateTimeEdit(initial)
+        for editor in (self.start_time, self.end_time):
+            editor.setTimeZone(QTimeZone(7*3600))
         self.start_time.setDisplayFormat("dd/MM/yyyy HH:mm")
         self.end_time.setDisplayFormat("dd/MM/yyyy HH:mm")
-        form.addRow("Từ:", self.start_time)
-        form.addRow("Đến:", self.end_time)
+        form.addRow("Từ (GMT+7):", self.start_time)
+        form.addRow("Đến (GMT+7):", self.end_time)
         layout.addLayout(form)
 
         buttons = QHBoxLayout()
@@ -407,6 +476,10 @@ class MainWindow(QMainWindow):
         self.export_btn.clicked.connect(self.export_report)
         buttons.addStretch()
         buttons.addWidget(self.export_btn)
+        self.cancel_export_btn = QPushButton("Hủy xuất")
+        self.cancel_export_btn.setEnabled(False)
+        self.cancel_export_btn.clicked.connect(lambda: self.backend.cancel_report())
+        buttons.addWidget(self.cancel_export_btn)
         layout.addLayout(buttons)
 
         self.report_text = QTextEdit()
@@ -414,62 +487,77 @@ class MainWindow(QMainWindow):
         self.report_text.setPlaceholderText("Kết quả xuất báo cáo sẽ hiện ở đây.")
         layout.addWidget(self.report_text)
 
+    def schedule_devices(self):
+        if not self._device_timer.isActive():
+            self._device_timer.start(75)
+
     def refresh_devices(self) -> None:
+        if self.device_table.state() == QAbstractItemView.EditingState:
+            self._device_timer.start(250)
+            return
+        try:
+            devices = self.backend.list_devices()
+            statuses = [self.backend.get_device_status(device) for device in devices]
+        except Exception as exc:
+            self.statusBar().showMessage(f"Không tải được thiết bị: {exc}", 15000)
+            return
+        self._display_connection = self.backend.get_connection_status()
         self._refreshing = True
-        devices = self.backend.list_devices()
-        self.device_table.setRowCount(0)
-        self._device_rows = {}
-        statuses = [self.backend.get_device_status(device) for device in devices]
-        for key, value in {
-            "total": len(devices), "online": statuses.count("Online"),
-            "pending": sum(status.startswith("Chưa xác minh") for status in statuses),
-            "untrusted": sum(not device.trusted for device in devices),
-        }.items():
-            self._stat_values[key].setText(str(value))
-
-        for device in devices:
-            row_index = self.device_table.rowCount()
-            self.device_table.insertRow(row_index)
-            self._device_rows[device.mac] = row_index
-
-            values = [
-                device_title(device),
-                type_label(device),
-                manufacturer_label(device),
-                self.backend.get_device_status(device),
-                "" if device.trusted else "",
-                device.last_seen.strftime("%d/%m %H:%M:%S"),
-                device.note or "",
-                device.mac,
-                device.ip,
-            ]
-
-            for col_index, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
-                item.setToolTip(str(value))
-                if col_index not in (Col.NAME, Col.NOTE, Col.TRUSTED):
-                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                if col_index == Col.NAME and not device.trusted:
-                    item.setData(ATTENTION_ROLE, "warning")
-                if col_index == Col.TRUSTED:
-                    item = QTableWidgetItem()
-                    item.setCheckState(Qt.Checked if device.trusted else Qt.Unchecked)
-                    item.setFlags((item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-                if col_index in (Col.TYPE, Col.MANUFACTURER):
-                    item.setToolTip(device.identity_evidence or "Chưa đủ bằng chứng để nhận diện loại thiết bị.")
-                if col_index == Col.NAME:
-                    item.setToolTip(f"{value}\nMAC: {device.mac}\nIP: {device.ip}")
-                self.device_table.setItem(row_index, col_index, item)
-
-        self.device_table.resizeColumnsToContents()
-        for column, width in ((Col.NAME, 220), (Col.TYPE, 210), (Col.MANUFACTURER, 205),
-                              (Col.STATUS, 200), (Col.LAST_SEEN, 150), (Col.NOTE, 120), (Col.MAC, 176)):
-            self.device_table.setColumnWidth(column, width)
-        self.device_table.horizontalHeader().setStretchLastSection(True)
-        self._refreshing = False
+        self.device_table.setUpdatesEnabled(False)
+        try:
+            self._device_cache = {d.mac: d for d in devices}
+            for row in reversed(range(self.device_table.rowCount())):
+                mac_item = self.device_table.item(row, Col.MAC)
+                if mac_item and mac_item.text() not in self._device_cache:
+                    self.device_table.removeRow(row)
+            self._device_rows = {self.device_table.item(r, Col.MAC).text(): r for r in range(self.device_table.rowCount())}
+            for key, value in {"total": len(devices), "online": statuses.count("Online"),
+                               "pending": sum(v.startswith("Chưa xác minh") for v in statuses),
+                               "untrusted": sum(not d.trusted for d in devices)}.items():
+                self._stat_values[key].setText(str(value))
+            for device, status in zip(devices, statuses):
+                row = self._device_rows.get(device.mac)
+                if row is None:
+                    row = self.device_table.rowCount()
+                    self.device_table.insertRow(row)
+                    self._device_rows[device.mac] = row
+                values = [device_title(device), type_label(device), manufacturer_label(device), status, "",
+                          device.last_seen.strftime("%d/%m %H:%M:%S"), device.note or "", device.mac, device.ip]
+                for column, value in enumerate(values):
+                    item = self.device_table.item(row, column)
+                    if item is None:
+                        item = QTableWidgetItem()
+                        if column not in (Col.NAME, Col.NOTE, Col.TRUSTED):
+                            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                        if column == Col.TRUSTED:
+                            item.setFlags((item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+                        self.device_table.setItem(row, column, item)
+                    if item.text() != str(value):
+                        item.setText(str(value))
+                    item.setData(Qt.UserRole, device.mac)
+                    item.setToolTip(device.identity_evidence if column in (Col.TYPE, Col.MANUFACTURER) else str(value))
+                    if column == Col.NAME:
+                        item.setData(ATTENTION_ROLE, "warning" if not device.trusted else None)
+                        item.setToolTip(f"{value}\nMAC: {device.mac}\nIP: {device.ip}")
+                    if column == Col.TRUSTED:
+                        state = Qt.Checked if device.trusted else Qt.Unchecked
+                        if item.checkState() != state:
+                            item.setCheckState(state)
+            for column, width in ((Col.NAME, 220), (Col.TYPE, 210), (Col.MANUFACTURER, 205),
+                                  (Col.STATUS, 200), (Col.LAST_SEEN, 150), (Col.NOTE, 120), (Col.MAC, 176)):
+                self.device_table.setColumnWidth(column, width)
+            self.device_table.horizontalHeader().setStretchLastSection(True)
+            try:
+                first = self.backend.is_first_run()
+                self.baseline_label.setText("Chưa bật cảnh báo thiết bị chưa tin cậy. Kiểm tra danh sách, sau đó chọn Công cụ → Hoàn tất thiết lập." if first else "Đã bật cảnh báo thiết bị chưa tin cậy cho hồ sơ mạng này. MAC/ARP là thông tin quan sát, không xác thực danh tính.")
+            except Exception as exc:
+                self.baseline_label.setText(f"Chưa đọc được trạng thái thiết lập: {exc}")
+        finally:
+            self._refreshing = False
+            self.device_table.setUpdatesEnabled(True)
 
     def refresh_alerts(self) -> None:
-        alerts = self.backend.get_alerts(limit=20)
+        alerts = self.backend.get_alerts(limit=100, offset=self._alert_offset, query=self.alert_search.text())
         self.alert_list.clear()
         if not alerts:
             self.alert_banner.setText("Chưa có cảnh báo được ghi nhận; trạng thái mạng xem ở tab Chẩn đoán.")
@@ -483,11 +571,27 @@ class MainWindow(QMainWindow):
 
         for alert in alerts:
             item = QListWidgetItem(f"{alert.level.upper()}  ·  {alert.ts:%d/%m %H:%M:%S}\n{alert.message}")
+            item.setData(Qt.UserRole, alert.id)
+            if alert.acknowledged:
+                item.setText("[Đã xử lý] " + item.text())
             tone = "danger" if alert.level == "danger" else "warning" if alert.level == "warning" else "success"
             background, foreground = BADGES[tone]
             item.setForeground(QColor(foreground))
             item.setBackground(QColor(background))
             self.alert_list.addItem(item)
+
+    def change_alert_page(self, delta, reset=False):
+        self._alert_offset = 0 if reset else max(0, self._alert_offset+delta)
+        self.refresh_alerts()
+
+    def acknowledge_selected_alert(self):
+        item = self.alert_list.currentItem()
+        if item and item.data(Qt.UserRole):
+            try:
+                self.backend.acknowledge_alert(item.data(Qt.UserRole))
+                self.refresh_alerts()
+            except Exception as exc:
+                QMessageBox.warning(self, "Cảnh báo", str(exc))
 
     def refresh_diagnosis(self) -> None:
         history = {
@@ -508,9 +612,9 @@ class MainWindow(QMainWindow):
         results = self._measurements.get("results", {})
         statuses = self._measurements.get("status", {})
         addresses = self._measurements.get("addresses", {})
-        for row, (target, label) in enumerate((("router", "Router"), ("isp", "ISP"), ("external", "Internet"))):
+        for row, (target, label) in enumerate((("router", "Router"), ("isp", "Hop sau gateway"), ("external", "Internet"))):
             result = results.get(target)
-            samples = history[target][-30:]
+            samples = [s for s in history[target] if s.status in {"ok", "timeout"} and (not addresses.get(target) or s.address == addresses.get(target) or not s.address)][-30:]
             loss = sum(sample.loss_pct for sample in samples) / len(samples) if samples else None
             rtt = f"{result.rtt_ms:.2f} ms" if result and result.rtt_ms is not None else "—"
             status = statuses.get(target, "Chưa đo trong phiên")
@@ -524,28 +628,43 @@ class MainWindow(QMainWindow):
 
         if PlotWidget is QWidget:
             self.diagnosis_plot.setVisible(False)
+            self.loss_plot.setVisible(False)
             return
 
-        self.diagnosis_plot.clear()
         self.diagnosis_plot.showGrid(True, True, alpha=0.15)
         self.diagnosis_plot.setLabel("left", "RTT", units="ms", color="#64748B")
         self.diagnosis_plot.setLabel("bottom", "Thời gian so với hiện tại", units="s", color="#64748B")
 
         for target, label, color in [
             ("router", "Router", "#2563EB"),
-            ("isp", "ISP", "#C2410C"),
+            ("isp", "Hop sau gateway", "#C2410C"),
             ("external", "Internet", "#15803D"),
         ]:
             samples = history.get(target, [])
             if not samples:
+                self._curves[target].setData([], [])
+                self._loss_curves[target].setData([], [])
                 continue
             stamp = now()
             x = [(sample.ts - stamp).total_seconds() for sample in samples]
             y = [sample.rtt_ms if sample.rtt_ms is not None else float("nan") for sample in samples]
-            self.diagnosis_plot.plot(x, y, pen=color, name=label, connect="finite")
+            # Chèn khoảng trống nếu không có mẫu hoặc đổi phiên/địa chỉ.
+            xx, yy, loss_y = [], [], []
+            previous = None
+            for sample, px, py in zip(samples, x, y):
+                if previous and ((sample.ts-previous.ts).total_seconds() > 10 or sample.session_id != previous.session_id or sample.address != previous.address):
+                    xx.append(px-.001); yy.append(float("nan")); loss_y.append(float("nan"))
+                xx.append(px); yy.append(py if sample.status in {"ok", "timeout"} else float("nan"))
+                loss_y.append(sample.loss_pct if sample.status in {"ok", "timeout"} else float("nan"))
+                previous = sample
+            self._curves[target].setData(xx, yy, connect="finite")
+            self._loss_curves[target].setData(xx, loss_y, connect="finite")
 
     @Slot(object)
     def on_connection_changed(self, status: dict) -> None:
+        current = self.backend.get_connection_status()
+        if any(current.get(key, False if key == "connected" else "") != value for key, value in status.items()):
+            return
         self._measurements = {}
         self._latest_diagnosis = None
         if status.get("connected"):
@@ -562,47 +681,64 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def on_measurement_changed(self, measurements: dict) -> None:
+        if self.backend.get_latest_measurements() != measurements:
+            return
         self._measurements = measurements
         self.refresh_diagnosis()
 
     @Slot(object)
     def on_device_updated(self, device: Device) -> None:
-        self.refresh_devices()
+        self.schedule_devices()
 
     @Slot(object)
     def on_alert_raised(self, alert: Alert) -> None:
+        if alert.network_id and alert.network_id != getattr(self.backend, "_storage_network", alert.network_id):
+            return
         self.refresh_alerts()
         if self.tray is not None:
             self.tray.notify("Cảnh báo NetGuard", alert.message, alert.level)
 
     @Slot(object)
     def on_diagnosis_changed(self, diagnosis: Diagnosis) -> None:
+        if self.backend.get_latest_diagnosis() != diagnosis:
+            return
         self._latest_diagnosis = diagnosis
-        self.refresh_diagnosis()
+        if not self._diagnosis_timer.isActive():
+            self._diagnosis_timer.start(75)
 
     @Slot(object)
     def on_ping_result(self, result) -> None:
-        self.refresh_diagnosis()
+        pass  # measurement_changed giao một snapshot cho cả chu kỳ.
+
+    def _can_edit_displayed(self):
+        if getattr(self, "_display_connection", None) != self.backend.get_connection_status():
+            self.statusBar().showMessage("Kết nối đã đổi; chọn lại thiết bị sau khi bảng cập nhật. Chưa lưu vào hồ sơ mới.", 15000)
+            self.schedule_devices()
+            return False
+        return True
 
     def _handle_device_item_changed(self, item):
         if self._refreshing or item is None:
             return
         if item.column() != Col.TRUSTED:
             return
+        if not self._can_edit_displayed():
+            return
         checked = item.checkState() == Qt.Checked
-        row_index = self.device_table.row(item)
-        mac = None
-        for device in self.backend.list_devices():
-            if self._device_rows.get(device.mac) == row_index:
-                mac = device.mac
-                break
-        if mac is not None:
-            self.backend.set_trusted(mac, checked)
+        mac = item.data(Qt.UserRole)
+        if mac:
+            try:
+                self.backend.set_trusted(mac, checked)
+            except Exception as exc:
+                self.statusBar().showMessage(f"Không lưu được tin cậy: {exc}", 15000)
+                self.schedule_devices()
 
     def _handle_device_cell_edit(self, row, col):
         if self._refreshing:
             return
         if col not in (Col.NAME, Col.NOTE):
+            return
+        if not self._can_edit_displayed():
             return
         item = self.device_table.item(row, col)
         if item is None:
@@ -612,38 +748,56 @@ class MainWindow(QMainWindow):
             return
         name = self.device_table.item(row, Col.NAME).text().strip() if col == Col.NAME else device.name
         note = self.device_table.item(row, Col.NOTE).text().strip() if self.device_table.item(row, Col.NOTE) else ""
-        self.backend.rename(device.mac, name, note)
+        try:
+            self.backend.rename(device.mac, name, note)
+        except Exception as exc:
+            self.statusBar().showMessage(f"Không lưu được thiết bị: {exc}", 15000)
+            self.schedule_devices()
 
     def _row_to_device(self, row_index: int) -> Device | None:
-        for device in self.backend.list_devices():
-            if self._device_rows.get(device.mac) == row_index:
-                return device
-        return None
+        item = self.device_table.item(row_index, Col.MAC)
+        return self._device_cache.get(item.text()) if item else None
 
     def trust_all_devices(self) -> None:
-        for device in self.backend.list_devices():
-            if not device.trusted:
-                self.backend.set_trusted(device.mac, True)
-        self.refresh_devices()
+        if not self._can_edit_displayed():
+            return
+        try:
+            for device in self.backend.list_devices():
+                if not device.trusted:
+                    self.backend.set_trusted(device.mac, True)
+        except Exception as exc:
+            QMessageBox.warning(self, "Không lưu được tin cậy", str(exc))
+        self.schedule_devices()
 
     def toggle_selected_trust(self) -> None:
+        if not self._can_edit_displayed():
+            return
         selected_rows = sorted({index.row() for index in self.device_table.selectedIndexes()})
         if not selected_rows:
             return
-        for row in selected_rows:
-            device = self._row_to_device(row)
-            if device is not None:
-                self.backend.set_trusted(device.mac, not device.trusted)
+        try:
+            for row in selected_rows:
+                device = self._row_to_device(row)
+                if device is not None:
+                    self.backend.set_trusted(device.mac, not device.trusted)
+        except Exception as exc:
+            QMessageBox.warning(self, "Không lưu được tin cậy", str(exc))
 
     def rename_selected_device(self) -> None:
+        if not self._can_edit_displayed():
+            return
         row = self.device_table.currentRow()
         if row < 0:
             return
         device = self._row_to_device(row)
         if device is None:
             return
+        displayed_connection = self.backend.get_connection_status()
         dialog = DeviceDialog(device, self)
         if dialog.exec() == QDialog.Accepted:
+            if self.backend.get_connection_status() != displayed_connection:
+                QMessageBox.warning(self, "Thiết bị", "Kết nối đã đổi trong khi mở chi tiết; chọn lại thiết bị ở mạng hiện tại.")
+                return
             name, note = dialog.values()
             try:
                 self.backend.rename(device.mac, name, note)
@@ -666,13 +820,165 @@ class MainWindow(QMainWindow):
         if not save_path:
             return
         try:
-            self.backend.export_report(start, end, save_path)
-            self.report_text.setPlainText(f"Xuất báo cáo thành công:\n{save_path}")
+            self.backend.export_report_async(start, end, save_path)
+            self.export_btn.setEnabled(False)
+            self.report_action.setEnabled(False)
+            self.cancel_export_btn.setEnabled(True)
+            self.report_text.setPlainText("Đang tổng hợp dữ liệu và dựng PDF ở nền…")
         except Exception as exc:  # pragma: no cover - UI-level handling
             QMessageBox.critical(self, "Lỗi xuất báo cáo", str(exc))
 
+    @Slot(object)
+    def on_service_status(self, status):
+        if status.get("error"):
+            self.statusBar().showMessage(f"{status['service']}: {status['error']} - dữ liệu có thể đã cũ.", 20000)
+        elif status.get("running"):
+            self.statusBar().showMessage(f"{status['service']}: đang hoạt động", 3000)
+
+    @Slot(object)
+    def on_report_finished(self, result):
+        self.export_btn.setEnabled(True)
+        self.report_action.setEnabled(True)
+        self.cancel_export_btn.setEnabled(False)
+        self.report_text.setPlainText(f"Xuất PDF thành công:\n{result['path']}" if result.get("ok") else f"Xuất PDF chưa hoàn tất: {result.get('error', '')}")
+
+    def finish_setup(self):
+        devices = self.backend.list_devices()
+        if not devices:
+            QMessageBox.information(self, "Thiết lập", "Hãy làm mới mạng và kiểm tra danh sách trước.")
+            return
+        if QMessageBox.question(self, "Bật cảnh báo", f"Đã kiểm tra {len(devices)} thiết bị của mạng hiện tại? Các thiết bị chưa được đánh dấu Tin cậy sẽ được cảnh báo, kể cả thiết bị đã có trong danh sách. MAC không xác thực danh tính.") != QMessageBox.Yes:
+            return
+        try:
+            self.backend.finish_baseline()
+            self.refresh_devices()
+        except Exception as exc:
+            QMessageBox.critical(self, "Thiết lập", str(exc))
+
+    def accept_gateway(self):
+        device = self._row_to_device(self.device_table.currentRow())
+        if device and QMessageBox.question(self, "Xác nhận router", f"Bạn đã kiểm tra router thực tế và xác nhận MAC {device.mac}? Thay đổi này cập nhật mốc so sánh gateway của mạng hiện tại.") == QMessageBox.Yes:
+            try:
+                self.backend.accept_gateway(device.mac)
+            except Exception as exc:
+                QMessageBox.critical(self, "Router", str(exc))
+
+    def trace_route(self):
+        try:
+            self.backend.run_traceroute()
+            self.tabs.setCurrentWidget(self.report_tab)
+            self.report_text.setPlainText("Đang traceroute trong nền…")
+        except Exception as exc:
+            QMessageBox.warning(self, "Traceroute", str(exc))
+
+    def show_presence(self):
+        device = self._row_to_device(self.device_table.currentRow())
+        if device:
+            rows = self.backend.get_device_history(device.mac, 24)
+            self.tabs.setCurrentWidget(self.report_tab)
+            self.report_text.setPlainText("Lịch sử quan sát 24 giờ (không xác thực thiết bị; không suy diễn qua khoảng ứng dụng ngừng chạy):\n" + "\n".join(f"{ts:%d/%m %H:%M:%S}: {'ngừng/chưa giám sát' if online is None else 'có phản hồi' if online else 'vắng ARP'}" for ts, online in rows))
+
+    def export_csv(self):
+        from extras.csv_export import export_devices
+        path, _ = QFileDialog.getSaveFileName(self, "Xuất thiết bị", "netguard_devices.csv", "CSV (*.csv)")
+        if path:
+            try:
+                export_devices(self.backend.list_devices(), path)
+                self.statusBar().showMessage(f"Đã xuất CSV: {path}", 10000)
+            except Exception as exc:
+                QMessageBox.warning(self, "CSV", str(exc))
+
+    def show_wifi(self):
+        self.tabs.setCurrentWidget(self.report_tab)
+        self.report_text.setPlainText("Đang quét Wi-Fi trong nền…")
+        self.backend.run_wifi_scan()
+
+    def show_settings(self):
+        from core.settings import load, save, DEFAULTS
+        try:
+            values = load()
+        except (OSError, ValueError, TypeError):
+            values = dict(DEFAULTS)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cài đặt - có hiệu lực sau khi mở lại")
+        dialog.resize(640, 600)
+        layout = QVBoxLayout(dialog)
+        label = QLabel("Chọn card/dải quét và điều chỉnh ngưỡng theo mạng của bạn. Thay đổi có hiệu lực khi mở lại NetGuard. Tối đa 1.024 địa chỉ trong dải quét; kết quả ARP/ICMP chỉ phản ánh các quan sát.")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        form = QFormLayout()
+        editors = {}
+        for key, title, low, high, integer in (
+            ("scan_interval", "Chu kỳ quét (giây)", 5, 3600, False),
+            ("ping_interval", "Chu kỳ ping (giây)", .2, 300, False),
+            ("ping_timeout", "Chờ phản hồi ping (giây)", .1, 10, False),
+            ("retention_days", "Giữ lịch sử (ngày)", 1, 3650, True),
+            ("loss_bad_pct", "Ngưỡng mất gói (%)", 0, 100, False),
+            ("router_rtt_ms", "Ngưỡng RTT router (ms)", 1, 1000, False),
+            ("external_rtt_ms", "Ngưỡng RTT đích ngoài (ms)", 1, 5000, False)):
+            editor = QSpinBox() if integer else QDoubleSpinBox()
+            editor.setRange(low, high)
+            editor.setValue(values[key])
+            editors[key] = editor
+            form.addRow(title, editor)
+        for key, title, hint in (
+            ("external_target", "Địa chỉ IPv4 đích ngoài", "Ví dụ 1.1.1.1"),
+            ("scan_cidr", "Dải quét tùy chọn", "Để trống: toàn subnet; ví dụ 192.168.1.0/24"),
+            ("interface_name", "Tên card ưu tiên", "Để trống: tự chọn; ví dụ Wi-Fi hoặc Ethernet"),
+            ("network_label", "Nhãn hồ sơ mạng bổ sung", "Dùng nhãn riêng nếu Windows không nhận được hồ sơ mạng")):
+            editor = QLineEdit(values[key])
+            editor.setPlaceholderText(hint)
+            editors[key] = editor
+            form.addRow(title, editor)
+        layout.addLayout(form)
+        button = QPushButton("Lưu cấu hình")
+        def store():
+            try:
+                result = {key: editor.text().strip() if isinstance(editor, QLineEdit) else editor.value() for key, editor in editors.items()}
+                save(result)
+                dialog.accept()
+            except Exception as exc:
+                QMessageBox.warning(dialog, "Cấu hình chưa hợp lệ", str(exc))
+        button.clicked.connect(store)
+        layout.addWidget(button)
+        dialog.exec()
+
+    def backup_database(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Sao lưu mạng hiện tại", "netguard_backup.sqlite", "SQLite (*.sqlite)")
+        if path:
+            try:
+                self.backend.backup_database(path)
+                self.statusBar().showMessage(f"Đã sao lưu: {path}", 10000)
+            except Exception as exc:
+                QMessageBox.critical(self, "Sao lưu", str(exc))
+
+    def restore_database(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Khôi phục mạng hiện tại", "", "SQLite (*.sqlite *.db)")
+        if path and QMessageBox.question(self, "Khôi phục", "Dừng theo dõi và khôi phục hồ sơ đang chọn từ bản sao này? Dữ liệu hiện tại sẽ được sao lưu trước.") == QMessageBox.Yes:
+            try:
+                self.backend.restore_database(path)
+                self.refresh_devices()
+                self.refresh_alerts()
+            except Exception as exc:
+                QMessageBox.critical(self, "Khôi phục", str(exc))
+
+    def select_history(self):
+        choices = self.backend.available_profiles()
+        selected, ok = QInputDialog.getItem(self, "Hồ sơ mạng", "Chọn hồ sơ lịch sử (dừng theo dõi), hoặc quay lại theo dõi:", ["Theo dõi kết nối hiện tại"] + choices, 0, False)
+        if ok:
+            try:
+                if selected == "Theo dõi kết nối hiện tại":
+                    self.backend.start()
+                else:
+                    self.backend.select_history(selected)
+                self.refresh_devices()
+                self.refresh_alerts()
+                self.refresh_diagnosis()
+            except Exception as exc:
+                QMessageBox.critical(self, "Hồ sơ mạng", str(exc))
+
     def closeEvent(self, event) -> None:
-        if self.tray is not None and self.tray.isVisible():
+        if self.tray is not None and self.tray.isVisible() and self.tray.isSystemTrayAvailable() and not self.tray.icon().isNull():
             self.hide()
             event.ignore()
             return

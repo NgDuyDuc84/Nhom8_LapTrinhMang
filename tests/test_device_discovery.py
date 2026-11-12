@@ -10,7 +10,6 @@ from scapy.layers.dns import DNS, DNSRR, DNSRRSRV
 
 from core import device_discovery as discovery
 from core.interfaces import NetInterface
-from models import DeviceHints
 
 PEER = "192.168.1.20"
 INSTANCE = "Office._ipp._tcp.local."

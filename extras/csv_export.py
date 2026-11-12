@@ -9,6 +9,12 @@ from pathlib import Path
 from models import Device, PingResult
 
 
+def safe_cell(value):
+    """CSV quoting không ngăn công thức; ép trường text nguy hiểm thành literal."""
+    value = str(value)
+    return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) or value.startswith(("\t", "\r", "\n")) else value
+
+
 def export_devices(devices: list[Device], path: str) -> None:
     """Xuất danh sách thiết bị mạng ra CSV."""
 
@@ -36,9 +42,9 @@ def export_devices(devices: list[Device], path: str) -> None:
             writer.writerow([
                 device.ip,
                 device.mac,
-                device.vendor,
-                device.name,
-                device.note,
+                safe_cell(device.vendor),
+                safe_cell(device.name),
+                safe_cell(device.note),
                 "Có" if device.trusted else "Không",
                 "Có" if device.online else "Không",
                 "Có" if device.randomized_mac else "Không",
@@ -66,7 +72,7 @@ def export_pings(pings: list[PingResult], path: str) -> None:
 
         for ping in pings:
             writer.writerow([
-                ping.target,
+                safe_cell(ping.target),
                 "" if ping.rtt_ms is None else ping.rtt_ms,
                 ping.loss_pct,
                 ping.ts.isoformat(sep=" ", timespec="seconds"),

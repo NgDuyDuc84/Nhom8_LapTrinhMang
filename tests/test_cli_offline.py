@@ -53,3 +53,24 @@ def test_monitor_starts_offline_and_stops_cleanly(monkeypatch, offline_cli, caps
     loop.stop.assert_called_once()
     offline_cli[0].assert_called_once_with(require_network=False)
     offline_cli[2].assert_called_once()
+
+
+def test_cli_keeps_listener_supervisor_after_start_failure_and_stops_it(monkeypatch):
+    from core.interfaces import NetInterface
+    iface = NetInterface("Wi-Fi", "test", "192.168.1.9", "255.255.255.0",
+                         "192.168.1.1", "00:11:22:33:44:55", False, True, 7)
+    monkeypatch.setattr(main, "check_environment", lambda **kwargs: [])
+    monkeypatch.setattr(main, "get_warnings", lambda: [])
+    monkeypatch.setattr(main, "get_active_interface", lambda: iface)
+    listener = Mock()
+    listener.start.side_effect = RuntimeError("capture open failed")
+    monkeypatch.setattr("core.arp_listener.ArpListener", Mock(return_value=listener))
+    loop = Mock()
+    loop.is_running.return_value = True
+    def create_loop(**kwargs):
+        loop.start.side_effect = lambda: kwargs["on_interface"](iface)
+        return loop
+    monkeypatch.setattr("services.scan_loop.ScanLoop", create_loop)
+    monkeypatch.setattr(main.time, "sleep", Mock(side_effect=KeyboardInterrupt))
+    assert main.run_monitor() == 0
+    listener.stop.assert_called_once()

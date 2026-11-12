@@ -67,6 +67,8 @@ class NetInterface:
     is_virtual: bool
     is_up: bool
     index: int = 0
+    profile_id: str = ""
+    adapter_id: str = ""
 
 
 # ---------------------------------------------------------------- tiện ích Windows
@@ -266,6 +268,8 @@ def list_interfaces() -> list[NetInterface]:
     gateways = _gateway_table()
     links = _link_table()
     interfaces: list[NetInterface] = []
+    from core.network_profiles import profiles_by_adapter
+    profiles = profiles_by_adapter() if any(getattr(i, "guid", "") for i in conf.ifaces.values()) else {}
 
     known_indices = {int(getattr(item, "index", 0) or 0) for item in conf.ifaces.values()}
     if set(addresses) - known_indices:
@@ -286,6 +290,9 @@ def list_interfaces() -> list[NetInterface]:
                 is_virtual=_is_virtual(name, description),
                 is_up=links.get(index, False) and _has_usable_ipv4(ipv4) and bool(netmask),
                 index=index,
+                profile_id=profiles.get(str(getattr(iface, "guid", "")).strip("{}").lower(),
+                                        "unidentified" if getattr(iface, "guid", "") else ""),
+                adapter_id=str(getattr(iface, "guid", "")).strip("{}").lower(),
             )
         )
 
@@ -302,6 +309,9 @@ def get_active_interface(preferred: NetInterface | None = None) -> NetInterface:
     interfaces = list_interfaces()
     usable = [i for i in interfaces if i.is_up and not i.is_virtual
               and _has_usable_ipv4(i.ip) and i.netmask]
+    from config import SETTINGS
+    if SETTINGS["interface_name"]:
+        usable = [i for i in usable if i.name == SETTINGS["interface_name"]]
     if preferred is not None:
         for candidate in usable:
             if ((preferred.mac and candidate.mac == preferred.mac)
@@ -342,6 +352,13 @@ def get_subnet_hosts(iface: NetInterface) -> list[str]:
         raise ValueError(f"Không hiểu địa chỉ {iface.ip}/{iface.netmask}: {exc}") from exc
 
     host_count = network.num_addresses if network.prefixlen >= 31 else network.num_addresses - 2
+    from config import SETTINGS
+    if SETTINGS["scan_cidr"]:
+        selected = ipaddress.IPv4Network(SETTINGS["scan_cidr"], strict=False)
+        if not selected.subnet_of(network):
+            raise ValueError("Dải quét đã chọn phải nằm trong subnet của card hiện tại.")
+        network = selected
+        host_count = network.num_addresses if network.prefixlen >= 31 else network.num_addresses-2
     if host_count > MAX_SCAN_HOSTS:
         raise ValueError(
             f"Dải {network} có {host_count} địa chỉ host, vượt giới hạn "
@@ -383,6 +400,9 @@ def get_warnings() -> list[str]:
     Danh sách rỗng nghĩa là không có gì đáng lưu ý.
     """
     warnings: list[str] = []
+    from config import SETTINGS_ERROR
+    if SETTINGS_ERROR:
+        warnings.append(SETTINGS_ERROR)
     try:
         vpn = [i for i in list_interfaces() if i.is_virtual and i.is_up and "warp" in i.name.lower()]
     except Exception:

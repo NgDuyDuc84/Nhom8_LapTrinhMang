@@ -15,11 +15,17 @@ Không import Qt.
 from __future__ import annotations
 
 import sys
+import logging
+import ipaddress
+from dataclasses import asdict
+from contextlib import nullcontext
+from core.network_context import connection_key, network_id, network_scope
+from db.database import transaction
 import threading
 import time
 from typing import Callable
 
-from config import OFFLINE_AFTER_MISSES, SCAN_INTERVAL_SEC
+from config import OFFLINE_AFTER_MISSES, SCAN_INTERVAL_SEC, MAX_KNOWN_DEVICES, SETTINGS
 from core.arp_scanner import ScanEntry, scan_subnet
 from core.interfaces import NetInterface, get_active_interface
 from db import repository
@@ -44,11 +50,8 @@ def _log(message: str) -> None:
 
 
 def _is_randomized(mac: str) -> bool:
-    """Kiểm tra MAC ngẫu nhiên; ``extras.mac_random`` chưa xong thì tạm trả ``False``."""
-    try:
-        return bool(mac_random.is_randomized(mac))
-    except NotImplementedError:
-        return False
+    """MAC quản lý cục bộ là dấu hiệu địa chỉ riêng tư, không phải xác thực."""
+    return bool(mac_random.is_randomized(mac))
 
 
 class ScanLoop:
@@ -66,6 +69,7 @@ class ScanLoop:
         on_scan: Callable[[list[ScanEntry]], None] | None = None,
         on_refresh: Callable[[NetInterface | None, list[ScanEntry] | None, str | None], None] | None = None,
         on_identify: Callable[[NetInterface, list[ScanEntry], bool], None] | None = None,
+        scoped: bool = False, generation_provider=None, commit_lock=None, session_provider=None, on_status=None,
     ) -> None:
         self._on_device = on_device or (lambda device, event: None)
         self._on_alert = on_alert or (lambda alert: None)
@@ -78,7 +82,15 @@ class ScanLoop:
         self._on_refresh = on_refresh or (lambda iface, entries, error: None)
         self._on_identify = on_identify or (lambda iface, entries, force: None)
         self._network_key: tuple | None = None
-        self._scanner = scanner or (lambda chosen: scan_subnet(chosen))
+        self._scanner = scanner or (lambda chosen: scan_subnet(chosen, stop_event=self._stop_event))
+        self._scoped = scoped
+        self._owns_session = scoped and session_provider is None
+        self._owned_session = ""
+        self._storage_network = "legacy"
+        self._generation = generation_provider or (lambda: 0)
+        self._commit_lock = commit_lock or threading.RLock()
+        self._session_provider = session_provider or (lambda: self._owned_session)
+        self._on_status = on_status or (lambda status: None)
         self._misses: dict[str, int] = {}
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -92,6 +104,8 @@ class ScanLoop:
         """Bắt đầu luồng quét (gọi nhiều lần vẫn an toàn)."""
         if self.is_running():
             return
+        self._network_key = None
+        self._misses.clear()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="netguard-scan", daemon=True)
         self._thread.start()
@@ -101,9 +115,15 @@ class ScanLoop:
         self._stop_event.set()
         self._wake_event.set()
         thread = self._thread
-        self._thread = None
         if thread is not None and thread.is_alive():
             thread.join(timeout)
+            if thread.is_alive():
+                raise RuntimeError("Luồng quét chưa dừng; chưa thể đóng CSDL hoặc khởi động lại.")
+        self._thread = None
+        if self._owns_session and self._owned_session:
+            with network_scope(self._storage_network):
+                repository.end_session(self._owned_session)
+            self._owned_session = ""
 
     def is_running(self) -> bool:
         """True nếu luồng quét đang chạy."""
@@ -131,8 +151,11 @@ class ScanLoop:
             try:
                 entries = self.scan_once(reselect=refresh)
                 self.last_error = None
+                self._safe(self._on_status, {"service": "scan", "running": True, "error": ""})
             except Exception as exc:  # mọi lỗi mạng/CSDL đều không được làm chết vòng lặp
                 self.last_error = str(exc)
+                logging.getLogger(__name__).exception("Lượt quét thất bại")
+                self._safe(self._on_status, {"service": "scan", "running": False, "error": str(exc)})
                 _log(f"[quét lỗi] {exc} — sẽ thử lại ở chu kỳ sau")
             if refresh:
                 try:
@@ -157,75 +180,112 @@ class ScanLoop:
         if self._preferred_iface is None:
             self._preferred_iface = iface
         self._update_interface(iface, force=reselect)
+        generation = self._generation()
         entries = self._scanner(iface)
+        if self._stop_event.is_set():
+            raise RuntimeError("Đã hủy lượt quét trước khi ghi dữ liệu.")
+        # Đọc lại card sau I/O. Không nhận dữ liệu cũ sau DHCP/đổi mạng.
+        current = self._resolve_interface()
+        if connection_key(current) != connection_key(iface):
+            raise RuntimeError("Kết nối đã thay đổi trong lúc quét; bỏ kết quả cũ.")
+        context = network_scope(network_id(iface)) if self._scoped else nullcontext()
+        with context, self._commit_lock:
+            if generation != self._generation() or self._stop_event.is_set():
+                raise RuntimeError("Phiên kết nối đã thay đổi; bỏ kết quả quét cũ.")
+            return self._save_scan(iface, entries, reselect)
+
+    def _save_scan(self, iface, entries, reselect):
         moment = now()
-        seen: set[str] = set()
-
-        for entry in entries:
-            mac = entry.mac.lower()
-            existing = repository.get_device(mac)
-            is_new = existing is None
-            was_offline = existing is not None and not existing.online
-
-            device = existing or Device(ip=entry.ip, mac=mac, first_seen=moment, last_seen=moment)
-            device.ip = entry.ip
-            device.mac = mac
-            if not device.randomized_mac:
-                device.randomized_mac = _is_randomized(mac)
-            device.is_self = entry.is_self
-            device.last_seen = moment
-            device = identify_device(device, iface.gateway)
-
-            # Không tự đặt device.online = True ở đây: để set_online() phát hiện
-            # thay đổi và ghi PresenceLog (upsert sẽ ghi đè cờ online trước khi nó chạy).
-            repository.upsert_device(device)
-            repository.save_identity(device)
-            repository.set_online(mac, True, ts=moment)
-            self._misses[mac] = 0
-            seen.add(mac)
-
-            stored = repository.get_device(mac)
-            if stored is None:  # phòng thủ: không xảy ra trong điều kiện bình thường
-                continue
-            if is_new:
-                self._on_device(stored, "new")
-            elif was_offline:
-                self._on_device(stored, "online")
-
-            # Chỉ cảnh báo thiết bị MỚI xuất hiện sau khi đã chốt đường cơ sở.
-            if is_new and not baseline.is_first_run() and not stored.trusted:
-                alert = alerts_service.raise_stranger(stored)
-                if alert is not None:
-                    self._on_alert(alert)
-
-        self._mark_offline(seen, moment)
-        self._on_scan(entries)
+        seen = set()
+        events, alerts = [], []
+        misses_before = dict(self._misses)
         try:
-            self._on_identify(iface, entries, reselect)
-        except Exception as exc:
-            _log(f"[yêu cầu nhận diện] {exc}")
+            with transaction() as connection:
+                known_count = connection.execute("SELECT count(*) FROM Devices").fetchone()[0]
+                connection.execute("UPDATE Devices SET is_self=0 WHERE mac<>? AND is_self=1", (iface.mac.lower(),))
+                # Giữ mọi quan sát IP/MAC, kể cả nhiều MAC cùng nhận một IP.
+                for entry in entries:
+                    repository.record_observation(entry.ip, entry.mac, moment, self._session_provider())
+                grouped = {}
+                for entry in entries:
+                    grouped.setdefault(entry.mac.lower(), []).append(entry)
+                for mac, claims in grouped.items():
+                    existing = repository.get_device(mac)
+                    # Giữ IP chính ổn định nếu một MAC có nhiều IP trong lượt này.
+                    entry = next((e for e in claims if existing and e.ip == existing.ip), claims[0])
+                    is_new = existing is None
+                    if is_new:
+                        known_count += 1
+                        if known_count > MAX_KNOWN_DEVICES:
+                            raise RuntimeError("Đã đạt ngân sách 10.000 hồ sơ thiết bị của mạng này; bỏ lượt quét và giữ dữ liệu hiện tại. Sao lưu, giảm dải quét hoặc lập hồ sơ mới để kiểm tra lưu lượng bất thường.")
+                    was_offline = existing is not None and not existing.online
+                    if was_offline:
+                        repository.pending_device_alert(mac, True)
+                    device = existing or Device(ip=entry.ip, mac=mac, first_seen=moment, last_seen=moment)
+                    device.ip, device.mac = entry.ip, mac
+                    device.randomized_mac = _is_randomized(mac)
+                    device.is_self = entry.is_self
+                    device.last_seen = moment
+                    device = identify_device(device, iface.gateway)
+                    repository.upsert_device(device)
+                    repository.save_identity(device)
+                    repository.set_online(mac, True, ts=moment)
+                    self._misses[mac] = 0
+                    seen.add(mac)
+                    stored = repository.get_device(mac)
+                    if is_new or was_offline:
+                        events.append((stored, "new" if is_new else "online"))
+                    # Thử lại sau lỗi callback và cảnh báo cả thiết bị cũ chưa tin cậy.
+                    # add_alert_once() chịu trách nhiệm chống lặp theo loại + MAC.
+                    if not baseline.is_first_run() and not stored.trusted and repository.pending_device_alert(mac):
+                        alert = alerts_service.raise_stranger(stored)
+                        if alert:
+                            alerts.append(alert)
+                            repository.pending_device_alert(mac, False)
+                for device in repository.list_devices():
+                    if device.mac in seen:
+                        continue
+                    probe_range = ipaddress.ip_network(SETTINGS["scan_cidr"] or f"{iface.ip}/{iface.netmask}", strict=False)
+                    if ipaddress.ip_address(device.ip) not in probe_range:
+                        continue  # Không suy ra vắng mặt cho địa chỉ không được quét.
+                    misses = self._misses.get(device.mac, 0) + 1
+                    self._misses[device.mac] = misses
+                    if misses >= OFFLINE_AFTER_MISSES and device.online:
+                        repository.set_online(device.mac, False, ts=moment)
+                        events.append((repository.get_device(device.mac), "offline"))
+        except Exception:
+            self._misses = misses_before
+            raise
+        for device, event in events:
+            self._safe(self._on_device, device, event)
+        for alert in alerts:
+            self._safe(self._on_alert, alert)
+        self._safe(self._on_scan, entries)
+        self._safe(self._on_identify, iface, entries, reselect)
         return entries
 
+    @staticmethod
+    def _safe(callback, *args):
+        try:
+            callback(*args)
+        except Exception:
+            logging.getLogger(__name__).exception("Callback quét mạng thất bại")
+
     def _update_interface(self, iface: NetInterface | None, *, force: bool = False) -> None:
-        key = (iface.index, iface.ip, iface.netmask, iface.gateway) if iface else None
+        key = connection_key(iface)
         self._iface = iface
         # Listener và bộ đếm vắng mặt phải theo cấu hình kết nối mới.
         if force or key != self._network_key:
+            if self._owns_session and key != self._network_key:
+                with network_scope(self._storage_network):
+                    if self._owned_session:
+                        repository.end_session(self._owned_session)
+                self._owned_session = ""
+                if iface is not None:
+                    self._storage_network = network_id(iface)
+                    with network_scope(self._storage_network):
+                        self._owned_session = repository.start_session(asdict(iface))
             if key != self._network_key:
                 self._misses.clear()
             self._on_interface(iface)
             self._network_key = key
-
-    def _mark_offline(self, seen: set[str], moment) -> None:
-        """Đếm số lần vắng mặt; đủ ``OFFLINE_AFTER_MISSES`` thì đánh dấu offline."""
-        for device in repository.list_devices():
-            if device.mac in seen:
-                continue
-            misses = self._misses.get(device.mac, 0) + 1
-            self._misses[device.mac] = misses
-            if misses < OFFLINE_AFTER_MISSES or not device.online:
-                continue
-            repository.set_online(device.mac, False, ts=moment)
-            stored = repository.get_device(device.mac)
-            if stored is not None:
-                self._on_device(stored, "offline")

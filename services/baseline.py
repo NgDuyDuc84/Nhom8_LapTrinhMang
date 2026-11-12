@@ -2,7 +2,7 @@
 
 Trước khi chốt (lần chạy đầu), mọi thiết bị tìm thấy đều được lưu với
 ``trusted = False`` và **không sinh cảnh báo**, tránh bão cảnh báo ngay khi mở app.
-Sau khi ``finish_baseline()``, thiết bị **mới** chưa tin cậy xuất hiện sẽ bị cảnh báo.
+Sau khi ``finish_baseline()``, thiết bị chưa tin cậy xuất hiện hoặc cần kiểm tra lại sẽ bị cảnh báo.
 Trạng thái được lưu trong bảng ``Meta`` nên tắt/mở lại app vẫn nhớ.
 
 Không import Qt.
@@ -11,6 +11,7 @@ Không import Qt.
 from __future__ import annotations
 
 from db import repository
+from db.database import transaction
 from models import now
 
 BASELINE_KEY = "baseline_done"
@@ -26,10 +27,15 @@ def is_first_run() -> bool:
 
 def finish_baseline() -> None:
     """Chốt đường cơ sở. Gọi nhiều lần chỉ có tác dụng lần đầu."""
-    if not is_first_run():
-        return
-    repository.set_meta(BASELINE_KEY, "1")
-    repository.set_meta(BASELINE_AT_KEY, now().replace(microsecond=0).isoformat())
+    with transaction() as connection:
+        if not is_first_run():
+            return
+        stamp = now().isoformat()
+        connection.execute("DELETE FROM BaselineMembers")
+        connection.execute("INSERT INTO BaselineMembers SELECT mac,trusted,? FROM Devices", (stamp,))
+        connection.execute("INSERT INTO DeviceAlertState SELECT mac,CASE WHEN trusted=0 THEN 1 ELSE 0 END FROM Devices WHERE 1 ON CONFLICT(mac) DO UPDATE SET pending=excluded.pending")
+        repository.set_meta(BASELINE_KEY, "1")
+        repository.set_meta(BASELINE_AT_KEY, stamp)
 
 
 def baseline_at():
@@ -42,5 +48,7 @@ def baseline_at():
 
 def reset_baseline() -> None:
     """Xoá cờ đường cơ sở (dùng khi muốn lập lại từ đầu, ví dụ khi chuyển nhà/mạng mới)."""
-    repository.set_meta(BASELINE_KEY, "0")
-    repository.set_meta(BASELINE_AT_KEY, "")
+    with transaction() as connection:
+        repository.set_meta(BASELINE_KEY, "0")
+        repository.set_meta(BASELINE_AT_KEY, "")
+        connection.execute("DELETE FROM BaselineMembers")

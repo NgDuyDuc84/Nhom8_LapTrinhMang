@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import sys
 import time
+import logging
 
 from core.console import setup_console_encoding
 from core.interfaces import check_environment, get_active_interface, get_warnings
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help="địa chỉ đích cho chế độ trace (mặc định: 1.1.1.1)",
     )
+    parser.add_argument("--history", action="store_true", help="chỉ xem dữ liệu/báo cáo, không xin quyền bắt gói")
     parser.add_argument(RELAUNCH_ARGUMENT, action="store_true", help=argparse.SUPPRESS)
     return parser
 
@@ -81,7 +83,7 @@ def run_baseline() -> int:
         print(f"  {device.ip:<16}{device.mac:<20}{device.vendor or 'Unknown':<14}{trust}")
 
     baseline.finish_baseline()
-    print("\nĐã chốt đường cơ sở. Từ giờ thiết bị MỚI chưa tin cậy sẽ bị cảnh báo.")
+    print("\nĐã chốt đường cơ sở. Từ giờ thiết bị chưa tin cậy xuất hiện hoặc cần kiểm tra lại sẽ bị cảnh báo.")
     return 0
 
 
@@ -93,6 +95,7 @@ def run_monitor() -> int:
     from services import baseline
     from services.alerts import ArpAnomalyDetector
     from services.scan_loop import ScanLoop
+    from core.network_context import network_scope, network_id
 
     database.initialize()
     problems = check_environment(require_network=False)
@@ -116,7 +119,7 @@ def run_monitor() -> int:
         print("Lần đầu chạy: đang lập đường cơ sở, CHƯA cảnh báo thiết bị lạ.")
         print("Khi đã thấy đủ thiết bị của mình, mở terminal khác chạy: python main.py --cli baseline")
     else:
-        print("Đã có đường cơ sở: thiết bị MỚI chưa tin cậy sẽ bị cảnh báo.")
+        print("Đã có đường cơ sở: thiết bị chưa tin cậy xuất hiện hoặc cần kiểm tra lại sẽ bị cảnh báo.")
     print("Nhấn Ctrl+C để dừng.\n")
 
     def on_device(device, event: str) -> None:
@@ -131,15 +134,17 @@ def run_monitor() -> int:
 
     detector = None
     listener = None
+    arp_network = "legacy"
 
     def on_arp_observation(observation) -> None:
         if detector is None:
             return
-        for alert in detector.observe(observation):
-            on_alert(alert)
+        with network_scope(arp_network):
+            for alert in detector.observe(observation):
+                on_alert(alert)
 
     def on_interface(chosen) -> None:
-        nonlocal detector, listener
+        nonlocal detector, listener, arp_network
         if listener is not None:
             listener.stop()
             listener = None
@@ -147,17 +152,18 @@ def run_monitor() -> int:
         if chosen is None:
             print("Mất kết nối LAN; chờ kết nối lại ở chu kỳ quét sau.")
             return
-        detector = ArpAnomalyDetector(chosen.gateway, repository.list_devices())
+        arp_network = network_id(chosen)
+        with network_scope(arp_network):
+            detector = ArpAnomalyDetector(chosen.gateway, repository.list_devices(), subnet=f"{chosen.ip}/{chosen.netmask}")
         listener = ArpListener(on_observation=on_arp_observation, iface=chosen)
         try:
             listener.start()
         except RuntimeError as exc:
-            listener = None
-            print(f"Lưu ý: không bật được nghe ARP: {exc}")
+            print(f"Lưu ý: bộ nghe ARP đang thử mở lại: {exc}")
             return
         print("Đang nghe ARP thụ động để phát hiện IP/MAC bất thường.")
 
-    loop = ScanLoop(on_device=on_device, on_alert=on_alert, iface=iface, on_interface=on_interface)
+    loop = ScanLoop(on_device=on_device, on_alert=on_alert, iface=iface, on_interface=on_interface, scoped=True)
     try:
         loop.start()
         while loop.is_running():
@@ -165,9 +171,16 @@ def run_monitor() -> int:
     except KeyboardInterrupt:
         print("\nĐang dừng...")
     finally:
-        loop.stop()
-        if listener is not None:
-            listener.stop()
+        errors = []
+        for service in (loop, listener):
+            if service is not None:
+                try:
+                    service.stop()
+                except Exception as exc:
+                    errors.append(str(exc))
+                    logging.getLogger(__name__).exception("Không dừng được dịch vụ CLI")
+        if errors:
+            raise RuntimeError(" | ".join(errors))
         database.close()
     print("Đã dừng theo dõi.")
     return 0
@@ -184,19 +197,19 @@ def run_trace(target: str | None = None) -> int:
     try:
         iface = get_active_interface()
         print(f"Traceroute tới {target}, qua card {iface.name} ({iface.ip}), chờ phản hồi...")
-        hops = trace(target)
+        hops = trace(target, iface=iface)
     except (RuntimeError, ValueError) as exc:
         print(f"LỖI: {exc}")
         return 1
 
-    isp_hop = find_isp_hop(hops, iface.gateway)
+    isp_hop = find_isp_hop(hops, iface.gateway, target)
     print(f"\n{'TTL':<6}{'IP':<20}{'RTT (ms)':<14}GHI CHÚ")
     print("-" * 54)
     for hop in hops:
         rtt = "*" if hop.rtt_ms is None else f"{hop.rtt_ms:.2f}"
         notes: list[str] = []
         if isp_hop is hop:
-            notes.append("hop nhà mạng đầu tiên sau gateway")
+            notes.append("hop phản hồi sau gateway (chưa xác minh ISP)")
         if hop.flagged:
             notes.append("độ trễ bắt đầu tăng rõ")
         print(f"{hop.ttl:<6}{hop.ip or '*':<20}{rtt:<14}{'; '.join(notes)}")
@@ -204,7 +217,7 @@ def run_trace(target: str | None = None) -> int:
     if isp_hop is None:
         print(f"\nKhông xác định được hop nhà mạng sau gateway {iface.gateway or '(không rõ)'}.")
     else:
-        print(f"\nHop được chọn làm mốc nhà mạng: TTL {isp_hop.ttl}, IP {isp_hop.ip}.")
+        print(f"\nHop quan sát sau gateway: TTL {isp_hop.ttl}, IP {isp_hop.ip}.")
     return 0
 
 
@@ -247,6 +260,7 @@ def run_diagnose() -> int:
         on_cycle=show_cycle,
         on_diagnosis=show_diagnosis,
         iface=iface,
+        scoped=True,
     )
     label = f"{iface.name} ({iface.ip}, gateway {iface.gateway or 'chưa có'})" if iface else "LAN (đang chờ kết nối)"
     print(f"Chẩn đoán mạng qua {label}; nhấn Ctrl+C để dừng.")
@@ -266,14 +280,14 @@ def run_diagnose() -> int:
     return 0
 
 
-def run_gui() -> int:
+def run_gui(*, history=False) -> int:
     """Khởi động giao diện với dịch vụ giám sát mạng."""
     from PySide6.QtWidgets import QApplication, QMessageBox
     from ui.theme import apply_light_theme
 
     app = QApplication.instance() or QApplication(sys.argv)
     apply_light_theme(app)
-    problems = check_environment(require_network=False)
+    problems = [] if history else check_environment(require_network=False)
     if problems:
         QMessageBox.critical(app.activeWindow(), "Không thể khởi động NetGuard", "\n".join(problems))
         return 1
@@ -281,7 +295,7 @@ def run_gui() -> int:
 
     if importlib.util.find_spec("ui.main_window") is None:
         message = (
-            "Chưa có ui/main_window.py của B. Hãy ghép giao diện rồi chạy lại NetGuard."
+            "Thiếu ui/main_window.py. Hãy khôi phục mã nguồn giao diện trước khi chạy."
         )
         QMessageBox.information(app.activeWindow(), "Giao diện chưa sẵn sàng", message)
         return 1
@@ -293,23 +307,28 @@ def run_gui() -> int:
 
         backend = Backend()
         window = MainWindow(backend, warnings=warnings)
-        backend.start()
+        if not history:
+            backend.start()
     except Exception as exc:
         if "backend" in locals():
             backend.stop()
         QMessageBox.critical(app.activeWindow(), "Không thể khởi động NetGuard", str(exc))
         return 1
 
-    app.aboutToQuit.connect(backend.stop)
+    def shutdown():
+        try:
+            backend.stop()
+        except Exception:
+            logging.getLogger(__name__).exception("Ứng dụng thoát khi worker chưa dừng hoàn toàn; CSDL chưa bị đóng sớm")
+    app.aboutToQuit.connect(shutdown)
     window.show()
     return app.exec()
 
 
-def run_cli(command: str, target: str | None = None) -> int:
+def _run_cli_command(command: str, target: str | None = None) -> int:
     """Chạy một chế độ dòng lệnh.
 
-    Đã có: ``scan`` (giai đoạn 3), ``baseline`` và ``monitor`` (giai đoạn 5).
-    ``trace`` và ``diagnose`` đã có; chế độ GUI thuộc giai đoạn 8.
+    Các lệnh hỗ trợ: scan, baseline, monitor, trace, diagnose.
     """
     command = command or "monitor"
     if command == "scan":
@@ -325,14 +344,39 @@ def run_cli(command: str, target: str | None = None) -> int:
     return 1
 
 
+def run_cli(command: str, target: str | None = None) -> int:
+    from config import DB_PATH
+    from core.instance_lock import InstanceLock
+    from core.network_context import network_id, network_scope
+    from contextlib import nullcontext
+    try:
+        chosen = get_active_interface()
+        storage = network_id(chosen)
+    except RuntimeError:
+        storage = "legacy"
+    lock = InstanceLock(DB_PATH) if command in {None, "monitor", "diagnose"} else nullcontext()
+    try:
+        with lock, network_scope(storage):
+            return _run_cli_command(command, target)
+    except (RuntimeError, ValueError) as exc:
+        print(f"LỖI: {exc}")
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Điểm vào chính: chọn chế độ CLI hoặc GUI theo tham số."""
     setup_console_encoding()
+    from core.logging_setup import setup_logging
+    setup_logging()
     args = build_parser().parse_args(argv)
 
     if args.cli:
         return run_cli(args.command, args.target)
     try:
+        if args.history:
+            if not prepare_gui_launch(relaunched=args.gui_relaunched, history=True):
+                return 0
+            return run_gui(history=True)
         if not prepare_gui_launch(relaunched=args.gui_relaunched):
             return 0
         return run_gui()

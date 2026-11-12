@@ -3,15 +3,12 @@
 
 from __future__ import annotations
 
-import io
 from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-import matplotlib
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
+from reportlab.graphics.shapes import Drawing, Rect, String, Line
+from models import now
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -20,7 +17,6 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    Image,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -34,17 +30,18 @@ from reportlab.platypus import (
 # 1. FONT TIẾNG VIỆT
 # =========================================================
 
-FONT_PATH = Path("C:/Windows/Fonts/arial.ttf")
+FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "NotoSans-Regular.ttf"
 
-if not FONT_PATH.exists():
-    raise FileNotFoundError(
-        f"Không tìm thấy font tiếng Việt: {FONT_PATH}"
-    )
 
-if "ArialVN" not in pdfmetrics.getRegisteredFontNames():
-    pdfmetrics.registerFont(
-        TTFont("ArialVN", str(FONT_PATH))
-    )
+def register_font():
+    if "ArialVN" in pdfmetrics.getRegisteredFontNames():
+        return
+    candidates = [FONT_PATH, Path("C:/Windows/Fonts/arial.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")]
+    for candidate in candidates:
+        if candidate.is_file():
+            pdfmetrics.registerFont(TTFont("ArialVN", str(candidate)))
+            return
+    raise RuntimeError("Thiếu font PDF. Khôi phục assets/fonts/NotoSans-Regular.ttf từ mã nguồn.")
 
 
 # =========================================================
@@ -138,79 +135,35 @@ def draw_page_number(canvas, doc):
 # =========================================================
 
 def create_ping_chart(ping_stats: dict):
-    """Vẽ biểu đồ RTT trung vị và tỷ lệ mất gói."""
-
-    targets = ["router", "isp", "external"]
-    labels = ["Router", "ISP", "External"]
-
-    rtts = []
-    losses = []
-
-    for target in targets:
-        stats = ping_stats.get(target, {}) or {}
-
-        rtt = stats.get("rtt_median_ms")
-        loss = stats.get("loss_pct", 0)
-
-        rtts.append(float(rtt) if rtt is not None else 0.0)
-        losses.append(float(loss) if loss is not None else 0.0)
-
-    fig, axes = plt.subplots(2, 1, figsize=(8, 6))
-
-    # Biểu đồ RTT
-    axes[0].bar(labels, rtts, color="#2878B5")
-    axes[0].set_title("Median RTT by target")
-    axes[0].set_ylabel("RTT (ms)")
-    axes[0].grid(axis="y", alpha=0.25)
-
-    for index, value in enumerate(rtts):
-        axes[0].text(
-            index,
-            value,
-            f"{value:.1f}",
-            ha="center",
-            va="bottom",
-        )
-
-    # Biểu đồ mất gói
-    axes[1].bar(labels, losses, color="#E58B36")
-    axes[1].set_title("Packet loss by target")
-    axes[1].set_ylabel("Packet loss (%)")
-    axes[1].set_ylim(0, max(100, max(losses, default=0) * 1.15))
-    axes[1].grid(axis="y", alpha=0.25)
-
-    for index, value in enumerate(losses):
-        axes[1].text(
-            index,
-            value,
-            f"{value:.1f}%",
-            ha="center",
-            va="bottom",
-        )
-
-    fig.tight_layout()
-
-    buffer = io.BytesIO()
-    fig.savefig(
-        buffer,
-        format="png",
-        dpi=150,
-        bbox_inches="tight",
-    )
-
-    plt.close(fig)
-    buffer.seek(0)
-
-    return buffer
+    """Biểu đồ vector; thiếu dữ liệu hiện N/A, không vẽ giá trị 0 giả."""
+    drawing = Drawing(510, 250)
+    for metric, title, base_y, color in (("rtt_median_ms", "RTT trung vị (ms)", 150, "#2878B5"),
+                                         ("loss_pct", "Mất gói của probe đã gửi (%)", 25, "#E58B36")):
+        values = [ping_stats.get(t, {}).get(metric) for t in ("router", "isp", "external")]
+        maximum = max([float(v) for v in values if v is not None]+[1 if metric == "rtt_median_ms" else 100])
+        drawing.add(String(20, base_y+92, title, fontName="ArialVN", fontSize=10))
+        drawing.add(Line(20, base_y, 495, base_y, strokeColor=colors.lightgrey))
+        for index, (label, value) in enumerate(zip(("Router", "Hop sau gateway", "Đích ngoài"), values)):
+            x = 45+index*160
+            if value is not None:
+                height = float(value)/maximum*65
+                drawing.add(Rect(x, base_y, 65, height, fillColor=colors.HexColor(color), strokeColor=None))
+                text = f"{value:.1f}"
+            else:
+                height, text = 0, "N/A"
+            drawing.add(String(x+32, base_y+height+5, text, textAnchor="middle", fontName="ArialVN", fontSize=9))
+            drawing.add(String(x+32, base_y-15, label, textAnchor="middle", fontName="ArialVN", fontSize=9))
+    return drawing
 
 
 # =========================================================
 # 4. TẠO BÁO CÁO PDF
 # =========================================================
 
-def build_report(data: dict, path: str) -> None:
+def build_report(data: dict, path: str, stop_event=None) -> None:
     """Tạo báo cáo PDF từ dữ liệu Backend.export_report."""
 
+    register_font()
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -260,7 +213,7 @@ def build_report(data: dict, path: str) -> None:
         return Paragraph(safe_text(value), normal_style)
 
     story = []
-    chart_buffers = []
+
 
     # -----------------------------------------------------
     # TIÊU ĐỀ
@@ -318,6 +271,12 @@ def build_report(data: dict, path: str) -> None:
             "Chưa có thông tin giao diện mạng."
         ))
 
+    for text in data.get("coverage_notes", []):
+        story.append(paragraph(text))
+    for session in data.get("sessions", [])[:100]:
+        interface_at_measurement = session.get("interface", {})
+        story.append(paragraph(f"Phiên {session['id'][:8]}: {format_time(session['started'])} - {format_time(session.get('ended') or data.get('end'))}; card {interface_at_measurement.get('name', '?')}, IPv4 {interface_at_measurement.get('ip', '?')}, gateway {interface_at_measurement.get('gateway', '?')}"))
+
     # -----------------------------------------------------
     # 2. THỐNG KÊ PING
     # -----------------------------------------------------
@@ -372,14 +331,7 @@ def build_report(data: dict, path: str) -> None:
     ))
 
     if ping_stats:
-        chart_buffer = create_ping_chart(ping_stats)
-        chart_buffers.append(chart_buffer)
-
-        story.append(Image(
-            chart_buffer,
-            width=490,
-            height=367.5,
-        ))
+        story.append(create_ping_chart(ping_stats))
     else:
         story.append(paragraph(
             "Không có dữ liệu để vẽ biểu đồ."
@@ -403,10 +355,10 @@ def build_report(data: dict, path: str) -> None:
             "Thời điểm mất gói",
         ]]
 
-        for index, event in enumerate(loss_events, start=1):
+        for index, event in enumerate(loss_events[:500], start=1):
             loss_rows.append([
                 str(index),
-                str(get_value(event, "target", "-")),
+                str(get_value(event, "target", "-")) + f" ({get_value(event, 'count', 1)} probe)",
                 format_time(get_value(event, "ts")),
             ])
 
@@ -416,7 +368,7 @@ def build_report(data: dict, path: str) -> None:
         ))
     else:
         story.append(paragraph(
-            "Không ghi nhận sự kiện mất gói trong khoảng thời gian này."
+            "Không có probe timeout được lưu trong khoảng này; cần xem số mẫu và độ phủ giám sát, không suy ra mất gói 0% nếu thiếu dữ liệu."
         ))
 
     # -----------------------------------------------------
@@ -528,18 +480,15 @@ def build_report(data: dict, path: str) -> None:
 
     story.append(paragraph(
         f"Thời điểm tạo báo cáo: "
-        f"{format_time(datetime.now())}"
+        f"{format_time(now())} (GMT+7)"
     ))
 
     # -----------------------------------------------------
     # XUẤT FILE PDF
     # -----------------------------------------------------
 
-    doc.build(
-        story,
-        onFirstPage=draw_page_number,
-        onLaterPages=draw_page_number,
-    )
-
-    for buffer in chart_buffers:
-        buffer.close()
+    def page(canvas, doc):
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("Đã hủy xuất báo cáo.")
+        draw_page_number(canvas, doc)
+    doc.build(story, onFirstPage=page, onLaterPages=page)

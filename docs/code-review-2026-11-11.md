@@ -6,6 +6,8 @@
 
 Mức ưu tiên: **P1** cần xử lý trước khi dựa vào kết quả/cảnh báo hoặc nghiệm thu chức năng liên quan; **P2** gây sai kết quả, mất thông tin hoặc lỗi vận hành trong tình huống cụ thể; **P3** là giới hạn phạm vi, trải nghiệm hoặc bảo trì. Đây là 44 **nhóm vấn đề**, gồm cả lỗi và giới hạn thiết kế, không phải 44 lỗi đều xảy ra trong mọi lần chạy. Một lần đọc mã và kiểm thử offline không chứng minh đã tìm được mọi lỗi có thể tồn tại.
 
+> **Trạng thái hiện tại:** đây là ảnh chụp các phát hiện trước bản sửa. Kết quả xử lý từng nhóm, kiểm chứng và giới hạn còn giữ nằm trong [báo cáo sửa mã 12/11/2026](remediation-report-2026-11-12.md). Không dùng các con số/lỗi ở dưới như mô tả của bản mã mới.
+
 ## Bằng chứng kiểm tra
 
 - Chạy `.\.venv\Scripts\python.exe -m pytest -q`: **65 passed in 8.60s**.
@@ -26,6 +28,8 @@ Mức ưu tiên: **P1** cần xử lý trước khi dựa vào kết quả/cản
 `AsyncSniffer.start()` tạo luồng nền; lỗi mở capture có thể xảy ra trong luồng đó. Scanner chỉ ngủ 0,8 giây rồi gửi, không xác nhận capture đã sẵn sàng. Ngoại lệ từ `sniffer.stop()` lại bị bỏ qua. Khi giả lập capture khởi tạo lỗi nhưng phần gửi không lỗi, hàm vẫn trả danh sách gồm chính máy đang chạy. Sau ba lượt như vậy, `ScanLoop` có thể đánh dấu các thiết bị khác Offline dù thực tế chương trình không nghe được phản hồi.
 
 **Hướng sửa:** dùng tín hiệu capture sẵn sàng, kiểm tra lỗi/kết thúc bất thường của sniffer; chỉ dùng scan đã xác thực thành công để cập nhật hiện diện. Không dùng thời gian ngủ cố định làm xác nhận khởi tạo.
+
+**Cập nhật 11/11/2026:** đã triển khai bản sửa và 17 test hồi quy; toàn bộ 162 test pass. Người dùng sau đó yêu cầu sửa tiếp toàn bộ; xem báo cáo sửa mã hiện tại. Xem [tiến độ triển khai](implementation-progress.md) để biết thay đổi và giới hạn kiểm chứng. Mô tả và vị trí ở trên ghi lại mã tại thời điểm rà soát ban đầu.
 
 ### 02. [P1 — đã tái hiện] Bộ nghe ARP có thể hỏng mà dịch vụ không biết
 

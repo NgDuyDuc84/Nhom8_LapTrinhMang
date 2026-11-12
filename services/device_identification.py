@@ -12,6 +12,7 @@ from core.interfaces import NetInterface
 from db import repository
 from extras.device_identity import identify_device
 from models import Device
+from core.network_context import current_network, network_scope
 
 
 class DeviceIdentification:
@@ -41,6 +42,7 @@ class DeviceIdentification:
 
     def request(self, iface: NetInterface, entries: list[ScanEntry], force: bool = False) -> None:
         fingerprint = (
+            current_network(),
             iface.index, iface.ip, iface.netmask, iface.gateway,
             frozenset((item.mac.lower(), item.ip) for item in entries),
         )
@@ -48,7 +50,7 @@ class DeviceIdentification:
             if self._stop.is_set():
                 return
             self._generation += 1
-            self._pending = (self._generation, iface, tuple(entries), force, fingerprint)
+            self._pending = (self._generation, iface, tuple(entries), force, fingerprint, current_network())
             self._wake.set()
 
     def stop(self) -> None:
@@ -71,7 +73,7 @@ class DeviceIdentification:
                 break
             if job is None:
                 continue
-            generation, iface, entries, force, fingerprint = job
+            generation, iface, entries, force, fingerprint, storage = job
             if not force and fingerprint == self._last_fingerprint and time.monotonic() - self._last_discovered < self.CACHE_SECONDS:
                 continue
             try:
@@ -81,13 +83,15 @@ class DeviceIdentification:
                     with self._lock:
                         if generation != self._generation or self._stop.is_set():
                             break
-                        device = repository.get_device(entry.mac)
+                        with network_scope(storage):
+                            device = repository.get_device(entry.mac)
                         if device is None or device.ip != entry.ip or entry.ip not in hints:
                             continue
                         identified = identify_device(device, iface.gateway, hints[entry.ip])
-                        if not repository.save_identity(identified):
-                            continue
-                        stored = repository.get_device(entry.mac)
+                        with network_scope(storage):
+                            if not repository.save_identity(identified):
+                                continue
+                            stored = repository.get_device(entry.mac)
                     if stored is not None:
                         changed = True
                         self._on_device(stored)

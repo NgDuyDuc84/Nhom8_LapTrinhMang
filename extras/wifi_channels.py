@@ -21,7 +21,7 @@ def _signal_to_rssi(signal_percent: int) -> int:
     return round(signal_percent / 2 - 100)
 
 
-def scan_wifi() -> list[dict]:
+def _scan_wifi() -> list[dict]:
     """Quét Wi-Fi bằng netsh, trả danh sách các điểm truy cập."""
     try:
         result = subprocess.run(
@@ -33,11 +33,11 @@ def scan_wifi() -> list[dict]:
             timeout=15,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return []
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Không chạy được netsh/WLAN hoặc hết thời gian chờ: {exc}") from exc
 
     if result.returncode != 0:
-        return []
+        raise RuntimeError(f"netsh không quét được Wi-Fi: {result.stdout[:2000]}")
 
     # netsh có thể xuất thông tin bằng bảng mã Windows.
     # Nếu thấy ký tự lỗi, chạy lại bằng bảng mã mặc định.
@@ -78,7 +78,7 @@ def scan_wifi() -> list[dict]:
                 if current_signal is not None
                 else None
             ),
-            "band": current_band or _get_band(current_channel),
+            "band": current_band or "Unknown",
         })
 
     for line in output.splitlines():
@@ -139,7 +139,21 @@ def scan_wifi() -> list[dict]:
             current_channel = int(channel_match.group(1))
 
     save_network()
-    return networks
+    return list({n["bssid"]: n for n in networks}.values())
+
+
+def scan_wifi_status():
+    try:
+        networks = _scan_wifi()
+        return {"status": "ok" if networks else "empty_or_unparsed", "networks": networks,
+                "message": "Đã quét AP; RSSI là ước lượng." if networks else "Không đọc được BSSID. Kiểm tra WLAN, quyền Vị trí và ngôn ngữ netsh; cũng có thể không có AP trong vùng."}
+    except RuntimeError as exc:
+        return {"status": "error", "networks": [], "message": str(exc)}
+
+
+def scan_wifi():
+    """API tương thích; giao diện dùng scan_wifi_status() để giữ nguyên nhân lỗi."""
+    return scan_wifi_status()["networks"]
 
 
 def recommend_channel(networks: list[dict]) -> int | None:

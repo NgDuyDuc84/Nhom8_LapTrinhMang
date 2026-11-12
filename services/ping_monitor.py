@@ -6,6 +6,11 @@ import statistics
 import sys
 import threading
 import time
+from contextlib import nullcontext
+from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
+from core.network_context import network_id, network_scope, connection_key
+from config import SETTINGS
 from collections import deque
 from typing import Callable
 
@@ -56,7 +61,19 @@ class PingMonitor:
         interface_resolver: Callable[[], NetInterface] | None = None,
         on_interface: Callable[[NetInterface | None], None] | None = None,
         on_refresh: Callable[[str | None], None] | None = None,
+        scoped=False, session_provider=None, on_route=None, generation_provider=None,
     ) -> None:
+        self._storage_network = "legacy"
+        self._generation_provider = generation_provider or (lambda: 0)
+        self._cycle_session = ""
+        self._scoped = scoped
+        self._owns_session = scoped and session_provider is None
+        self._owned_session = ""
+        self._session_provider = session_provider or (lambda: self._owned_session)
+        self._on_route = on_route or (lambda hops: None)
+        self._sample_times = {}
+        self._baselines = {}
+        self._sample_addresses = {}
         self._on_ping = on_ping or (lambda result: None)
         self._on_diagnosis = on_diagnosis or (lambda result: None)
         self._on_cycle = on_cycle or (lambda results: None)
@@ -74,6 +91,7 @@ class PingMonitor:
             name: deque(maxlen=DIAG_WINDOW_SAMPLES)
             for name in ("router", "isp", "external")
         }
+        self._timestamps = {name: deque(maxlen=DIAG_WINDOW_SAMPLES) for name in self._history}
         self._isp_ip: str | None = None
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -81,7 +99,7 @@ class PingMonitor:
         self._refresh_requested = False
         self._thread: threading.Thread | None = None
         self._route_thread: threading.Thread | None = None
-        self._route_lock = threading.Lock()
+        self._route_lock = threading.RLock()
         self._last_route_attempt = 0.0
         self._last_emitted_verdict: str | None = None
         self._pending_verdict: str | None = None
@@ -101,6 +119,7 @@ class PingMonitor:
         """Khởi động ping và việc tìm hop ISP nếu chưa có."""
         if self.is_running():
             return
+        self._network_key = None
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="netguard-ping", daemon=True)
         self._thread.start()
@@ -113,8 +132,14 @@ class PingMonitor:
         for thread in (self._thread, self._route_thread):
             if thread is not None and thread is not current and thread.is_alive():
                 thread.join(timeout)
+        if any(thread and thread.is_alive() for thread in (self._thread, self._route_thread)):
+            raise RuntimeError("Luồng đo mạng chưa dừng; giữ tài nguyên để dừng lại an toàn.")
         self._thread = None
         self._route_thread = None
+        if self._owns_session and self._owned_session:
+            with network_scope(self._storage_network):
+                repository.end_session(self._owned_session)
+            self._owned_session = ""
 
     def is_running(self) -> bool:
         """True nếu luồng ping chính đang chạy."""
@@ -152,6 +177,7 @@ class PingMonitor:
     def _cycle(self, *, reselect: bool = False) -> str | None:
         """Trả lỗi của chính chu kỳ này để báo kết quả làm mới, nếu có."""
         self.last_error = None
+        self._cycle_session = self._session_provider()
         self.target_status = {}
         self._addresses = dict.fromkeys(self._history)
         if reselect:
@@ -162,6 +188,7 @@ class PingMonitor:
             self._set_interface(None, force=reselect)
             self.last_error = str(exc)
             self.target_status = {name: "chưa kết nối LAN" for name in self._history}
+            self._record_unavailable("offline")
             self._safe_callback(self._on_cycle, {name: None for name in self._history})
             self._update_stable_diagnosis(Diagnosis(
                 "home_issue", f"Máy đang mất kết nối LAN hoặc chưa có cấu hình IPv4. {exc}",
@@ -169,6 +196,8 @@ class PingMonitor:
             return str(exc)
 
         self._set_interface(iface, force=reselect)
+        self._cycle_session = self._session_provider()
+        generation = self._generation_provider()
         if self._preferred_iface is None:
             self._preferred_iface = iface
         if not iface.gateway:
@@ -177,6 +206,7 @@ class PingMonitor:
                 "isp": "không có gateway",
                 "external": "chưa đo: không có gateway",
             }
+            self._record_unavailable("unavailable")
             self._safe_callback(self._on_cycle, {name: None for name in self._history})
             self._update_stable_diagnosis(Diagnosis(
                 "unknown", f"Card '{iface.name}' có IPv4 nhưng không có gateway mặc định; "
@@ -195,27 +225,45 @@ class PingMonitor:
         self._addresses = addresses
         cycle_results: dict[str, PingResult | None] = {name: None for name in addresses}
         cycle_error = None
-        for target, address in addresses.items():
+        # I/O độc lập chạy cùng lúc; callback/SQLite vẫn chỉ chạy trên worker chính.
+        def measure(address):
             if self._stop_event.is_set():
-                return
-            if address is None:
-                self.target_status[target] = "chưa xác định hop (sẽ thử lại)"
-                continue
+                return None, RuntimeError("Đã dừng đo mạng")
             try:
-                rtt = self._pinger(address, PING_TIMEOUT_SEC)
+                return self._pinger(address, PING_TIMEOUT_SEC), None
             except Exception as exc:
-                self.last_error = str(exc)
-                cycle_error = str(exc)
-                _log(f"[ping {target}] {exc}")
-                self.target_status[target] = f"lỗi đo: {exc}"
-                # Không ghi lỗi tạo/gửi socket thành một mẫu mất gói.
-                continue
-            loss_pct = 0.0 if rtt is not None else 100.0
-            result = PingResult(target=target, rtt_ms=rtt, loss_pct=loss_pct)
-            cycle_results[target] = result
-            self._history[target].append(rtt)
-            repository.add_ping(result)
-            self._safe_callback(self._on_ping, result)
+                return None, exc
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="netguard-probe") as pool:
+            futures = {target: pool.submit(measure, address) for target, address in addresses.items() if address}
+            for target, address in addresses.items():
+                if self._stop_event.is_set():
+                    return "Đã dừng đo mạng."
+                if address is None:
+                    self.target_status[target] = "chưa xác định hop (sẽ thử lại)"
+                    self._store(PingResult(target, None, 0, status="unavailable", session_id=self._cycle_session))
+                    continue
+                rtt, error = futures[target].result()
+                if self._stop_event.is_set() or generation != self._generation_provider():
+                    return "Phiên kết nối đã thay đổi trong lúc đo; bỏ mẫu cũ."
+                if error:
+                    self.last_error = cycle_error = str(error)
+                    self.target_status[target] = f"lỗi đo: {error}"
+                    self._store(PingResult(target, None, 0, address=address, session_id=self._cycle_session, status="measurement_error"))
+                    continue
+                with self._route_lock:
+                    self._expire(target, address)
+                    if target == "isp" and address != self._isp_ip:
+                        self.target_status[target] = "hop vừa thay đổi; chờ mẫu mới"
+                        continue
+                    result = PingResult(target, rtt, 0.0 if rtt is not None else 100.0,
+                                        address=address, session_id=self._cycle_session,
+                                        status="ok" if rtt is not None else "timeout")
+                    cycle_results[target] = result
+                    self._history[target].append(rtt)
+                    self._timestamps[target].append(time.monotonic())
+                    self._sample_times[target] = time.monotonic()
+                self._store(result)
+                self._safe_callback(self._on_ping, result)
 
         self._safe_callback(self._on_cycle, cycle_results)
         stats = {name: self._stats(name, available=cycle_results[name] is not None)
@@ -225,11 +273,22 @@ class PingMonitor:
         return cycle_error
 
     def _set_interface(self, iface: NetInterface | None, *, force: bool = False) -> None:
-        key = (iface.index, iface.name, iface.ip, iface.netmask, iface.gateway) if iface else None
+        key = connection_key(iface)
         with self._route_lock:
+            previous_storage = self._storage_network
             self._iface = iface
+            if iface is not None and self._scoped:
+                self._storage_network = network_id(iface)
             if key == self._network_key and not force:
                 return
+            if self._owns_session:
+                with network_scope(previous_storage):
+                    if self._owned_session:
+                        repository.end_session(self._owned_session)
+                self._owned_session = ""
+                if iface is not None:
+                    with network_scope(self._storage_network):
+                        self._owned_session = repository.start_session(asdict(iface))
             self._network_key = key
             self._network_generation += 1
             self._isp_ip = None
@@ -238,25 +297,35 @@ class PingMonitor:
             self._pending_verdict = None
             self._last_emitted_verdict = None
             self._last_emitted_text = None
+            self._sample_times.clear()
+            self._sample_addresses.clear()
+            self._baselines.clear()
             for history in self._history.values():
                 history.clear()
+            for timestamps in self._timestamps.values():
+                timestamps.clear()
         self._safe_callback(self._on_interface, iface)
 
     def _stats(self, target: str, available: bool) -> TargetStats:
-        samples = list(self._history[target])
-        successful = sorted(value for value in samples if value is not None)
-        baseline = None
-        median = statistics.median(successful) if successful else None
-        if successful:
-            baseline = successful[int((len(successful) - 1) * 0.25)]
-        loss_pct = (sum(value is None for value in samples) / len(samples) * 100.0) if samples else 0.0
-        return TargetStats(
-            loss_pct=loss_pct,
-            rtt_median=median,
-            rtt_baseline=baseline,
-            samples=len(samples),
-            available=available,
-        )
+        with self._route_lock:
+            self._expire(target, self._addresses.get(target))
+            samples = list(self._history[target])
+            successful = sorted(value for value in samples if value is not None)
+            baseline = None
+            median = statistics.median(successful) if successful else None
+            if successful:
+                candidate = successful[int((len(successful) - 1) * 0.25)]
+                self._baselines[target] = min(candidate, self._baselines.get(target, candidate))
+                baseline = self._baselines[target]
+            loss_pct = (sum(value is None for value in samples) / len(samples) * 100.0) if samples else 0.0
+            return TargetStats(
+                loss_pct=loss_pct,
+                rtt_median=median,
+                rtt_baseline=baseline,
+                samples=len(samples),
+                available=available,
+                rtt_limit=SETTINGS["router_rtt_ms"] if target == "router" else SETTINGS["external_rtt_ms"],
+            )
 
     def _update_stable_diagnosis(self, diagnosis: Diagnosis, *, immediate: bool = False) -> None:
         if diagnosis.verdict == self._pending_verdict:
@@ -271,6 +340,9 @@ class PingMonitor:
             return
         self._last_emitted_verdict = diagnosis.verdict
         self._last_emitted_text = diagnosis.text
+        if self._owns_session:
+            with network_scope(self._storage_network):
+                repository.add_diagnosis(diagnosis, self._owned_session)
         self._safe_callback(self._on_diagnosis, diagnosis)
 
     def _maybe_start_route_discovery(self) -> None:
@@ -299,20 +371,57 @@ class PingMonitor:
                 max_hops=TRACE_MAX_HOPS,
                 timeout=0.25,
                 stop_event=self._stop_event,
+                iface=iface,
             )
-            hop = find_isp_hop(hops, iface.gateway)
+            hop = find_isp_hop(hops, iface.gateway, PING_EXTERNAL_TARGET)
             with self._route_lock:
                 if generation != self._network_generation or self._stop_event.is_set():
                     return  # Kết quả traceroute của kết nối cũ không được dùng lại.
-                self._isp_ip = hop.ip if hop is not None else None
+                new_address = hop.ip if hop is not None else None
+                if new_address != self._isp_ip:
+                    self._history["isp"].clear()
+                    self._timestamps["isp"].clear()
+                    self._baselines.pop("isp", None)
+                    self._sample_times.pop("isp", None)
+                self._isp_ip = new_address
+            context = network_scope(network_id(iface)) if self._scoped else nullcontext()
+            with context:
+                if self._owns_session:
+                    repository.add_route(hops, self._owned_session)
+                self._safe_callback(self._on_route, hops)
         except Exception as exc:
             if not self._stop_event.is_set():
                 self.last_error = str(exc)
                 _log(f"[tìm hop nhà mạng] {exc}")
 
-    @staticmethod
-    def _safe_callback(callback: Callable, value) -> None:
+    def _expire(self, target, address):
+        old_address = self._sample_addresses.get(target)
+        expired = time.monotonic()-self._sample_times.get(target, time.monotonic()) > max(15, self._interval*DIAG_WINDOW_SAMPLES*2)
+        if expired or (old_address is not None and address != old_address):
+            self._history[target].clear()
+            self._timestamps[target].clear()
+            self._baselines.pop(target, None)
+        horizon = max(15, self._interval*DIAG_WINDOW_SAMPLES*2)
+        stamps = self._timestamps[target]
+        if len(stamps) == len(self._history[target]):
+            while stamps and time.monotonic()-stamps[0] > horizon:
+                stamps.popleft()
+                self._history[target].popleft()
+        self._sample_addresses[target] = address
+
+    def _store(self, result):
+        context = network_scope(self._storage_network) if self._scoped else nullcontext()
+        with context:
+            repository.add_ping(result)
+
+    def _record_unavailable(self, status):
+        for target in self._history:
+            self._store(PingResult(target, None, 0, session_id=self._cycle_session, status=status))
+
+    def _safe_callback(self, callback: Callable, value) -> None:
         try:
-            callback(value)
+            context = network_scope(self._storage_network) if self._scoped else nullcontext()
+            with context:
+                callback(value)
         except Exception as exc:
             _log(f"[callback ping] {exc}")

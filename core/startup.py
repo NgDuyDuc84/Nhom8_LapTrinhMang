@@ -30,7 +30,7 @@ def _gui_python() -> Path:
     return windowed if windowed.is_file() else current
 
 
-def _start_windows_gui(interpreter: Path, *, elevate: bool) -> None:
+def _start_windows_gui(interpreter: Path, *, elevate: bool, history: bool = False) -> None:
     """Mở tiến trình mới; hủy UAC là thoát bình thường, không tự xin lại."""
     shell32 = ctypes.WinDLL("shell32", use_last_error=True)
     execute = shell32.ShellExecuteW
@@ -40,7 +40,7 @@ def _start_windows_gui(interpreter: Path, *, elevate: bool) -> None:
     ]
     execute.restype = ctypes.c_void_p
     arguments = subprocess.list2cmdline([
-        str(APP_ROOT / "main.py"), RELAUNCH_ARGUMENT,
+        str(APP_ROOT / "main.py"), RELAUNCH_ARGUMENT, *(["--history"] if history else []),
     ])
     ctypes.set_last_error(0)
     result = execute(
@@ -59,7 +59,7 @@ def _start_windows_gui(interpreter: Path, *, elevate: bool) -> None:
     )
 
 
-def prepare_gui_launch(*, relaunched: bool = False) -> bool:
+def prepare_gui_launch(*, relaunched: bool = False, history: bool = False) -> bool:
     """True: chạy GUI tại đây; False: đã chuyển tiến trình hoặc người dùng hủy.
 
     Cố định thư mục làm việc để cùng một launcher luôn dùng đúng dữ liệu dự án.
@@ -69,7 +69,7 @@ def prepare_gui_launch(*, relaunched: bool = False) -> bool:
     if sys.platform != "win32":
         return True
     interpreter = _gui_python()
-    needs_elevation = not is_admin()
+    needs_elevation = not history and not is_admin()
     needs_project_python = Path(sys.executable).resolve().parent != interpreter.resolve().parent
     if not needs_elevation and not needs_project_python:
         return True
@@ -79,7 +79,10 @@ def prepare_gui_launch(*, relaunched: bool = False) -> bool:
             "cần thiết sau khi mở lại. Hãy chạy Mo_NetGuard.cmd và chấp nhận "
             "hộp thoại cấp quyền của Windows."
         )
-    _start_windows_gui(interpreter, elevate=needs_elevation)
+    if history:
+        _start_windows_gui(interpreter, elevate=False, history=True)
+    else:
+        _start_windows_gui(interpreter, elevate=needs_elevation)
     return False
 
 

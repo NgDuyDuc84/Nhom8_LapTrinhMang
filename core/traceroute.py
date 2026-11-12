@@ -21,11 +21,11 @@ from models import Hop
 __all__ = ["trace", "find_isp_hop", "mark_latency_jump"]
 
 
-def _require_active_interface(target: str) -> None:
+def _require_active_interface(target: str, preferred=None):
     """Xác nhận có card LAN hoạt động trước khi chạy traceroute."""
     from core.interfaces import get_active_interface
 
-    iface = get_active_interface()
+    iface = get_active_interface(preferred) if preferred is not None else get_active_interface()
     if not iface.ip:
         raise RuntimeError(f"Card '{iface.name}' không có địa chỉ IPv4 để chạy traceroute.")
     try:
@@ -36,6 +36,8 @@ def _require_active_interface(target: str) -> None:
         is_local = False
     if not iface.gateway and not is_local:
         raise RuntimeError(f"Card '{iface.name}' không có gateway để traceroute ra Internet.")
+
+    return iface
 
 
 def _windows_trace(
@@ -59,6 +61,7 @@ def _windows_trace(
             stderr=subprocess.PIPE,
             text=True,
             errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except OSError as exc:
         raise RuntimeError(f"Không chạy được tracert.exe: {exc}") from exc
@@ -148,6 +151,7 @@ def trace(
     timeout: float = 1.0,
     count: int = 1,
     stop_event: Event | None = None,
+    iface=None,
 ) -> list[Hop]:
     """Tăng TTL từng bước; hop im lặng được ghi với ``ip=None`` và tiếp tục.
 
@@ -164,11 +168,20 @@ def trace(
         raise ValueError("Thời gian chờ traceroute phải lớn hơn 0.")
 
     try:
-        _require_active_interface(target)
+        chosen = _require_active_interface(target, iface)
         if sys.platform == "win32":
             # Windows tracert dùng ICMP và chọn interface theo routing table của OS.
             # Nó cũng tránh khác biệt raw-socket/Npcap giữa các bản Windows.
-            return _windows_trace(target, max_hops, timeout, stop_event)
+            from core.interfaces import _best_interface_index
+            from core.network_context import connection_key
+            import socket
+            address = socket.gethostbyname(target)
+            if _best_interface_index(address) != chosen.index:
+                raise RuntimeError("Tuyến Windows không đi qua card đang theo dõi; không dùng kết quả traceroute.")
+            hops = _windows_trace(target, max_hops, timeout, stop_event)
+            if _best_interface_index(address) != chosen.index or connection_key(_require_active_interface(target, chosen)) != connection_key(chosen):
+                raise RuntimeError("Tuyến/card đã thay đổi trong lúc traceroute; bỏ kết quả.")
+            return hops
 
         replies = icmp_traceroute(
             target,
@@ -178,6 +191,7 @@ def trace(
             first_hop=1,
             max_hops=max_hops,
             family=4,
+            source=chosen.ip,
         )
         by_ttl = {
             int(reply.distance): Hop(
@@ -196,7 +210,7 @@ def trace(
         raise _friendly_error(exc) from exc
 
 
-def find_isp_hop(hops: list[Hop], gateway_ip: str) -> Hop | None:
+def find_isp_hop(hops: list[Hop], gateway_ip: str, target: str = "1.1.1.1") -> Hop | None:
     """Trả hop phản hồi đầu tiên sau gateway; bỏ qua hop không phản hồi.
 
     Nếu gateway không xuất hiện trong câu trả lời (router có thể lọc ICMP), xem
@@ -214,7 +228,7 @@ def find_isp_hop(hops: list[Hop], gateway_ip: str) -> Hop | None:
         candidates = hops[gateway_index + 1:]
     else:
         candidates = [hop for hop in hops if hop.ttl > 1]
-    return next((hop for hop in candidates if hop.ip is not None), None)
+    return next((hop for hop in candidates if hop.ip is not None and hop.ip not in {gateway, target}), None)
 
 
 def mark_latency_jump(hops: list[Hop]) -> list[Hop]:

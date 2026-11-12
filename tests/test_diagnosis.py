@@ -24,7 +24,7 @@ def test_network_ok():
 def test_home_issue():
     """Router mất gói nhiều."""
     result = diagnose(
-        make_stats(loss=20), make_stats(), make_stats()
+        make_stats(loss=20), make_stats(), make_stats(loss=20)
     )
     assert result.verdict == "home_issue"
 
@@ -32,7 +32,7 @@ def test_home_issue():
 def test_isp_issue():
     """Đường truyền nhà mạng có vấn đề."""
     result = diagnose(
-        make_stats(), make_stats(loss=15), make_stats()
+        make_stats(), make_stats(loss=15), make_stats(loss=15)
     )
     assert result.verdict == "isp_issue"
 
@@ -74,7 +74,7 @@ def test_no_isp_external_ok():
     result = diagnose(
         make_stats(), None, make_stats()
     )
-    assert result.verdict == "unknown"
+    assert result.verdict == "ok"
 
 
 def test_loss_threshold():
