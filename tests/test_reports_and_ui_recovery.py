@@ -216,8 +216,48 @@ def test_settings_reject_invalid_cidr_and_save_atomically(tmp_path, monkeypatch)
     from core import settings
     monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
     with pytest.raises(ValueError):
-        settings.save({"scan_cidr": "10.0.0.0/8"})
+        settings.save({"scan_cidr": "10.0.0.0/33"})
     with pytest.raises(ValueError):
         settings.save({"ping_timeout": -1})
     settings.save({"scan_cidr": "192.168.1.0/24", "network_label": "Mạng riêng"})
     assert settings.load()["network_label"] == "Mạng riêng"
+
+
+def test_large_device_list_is_paginated_and_edits_target_visible_mac(window):
+    from db import database
+    from ipaddress import IPv4Address
+    backend, ui, _ = window
+    stamp = now().isoformat()
+    count = 16382
+    with database.transaction() as connection:
+        connection.executemany("INSERT INTO Devices(mac,ip,first_seen,last_seen) VALUES(?,?,?,?)",
+                               (((0x020000000000+i).to_bytes(6, "big").hex(":"),
+                                 str(IPv4Address(int(IPv4Address("10.0.0.1"))+i)), stamp, stamp)
+                                for i in range(count)))
+    ui.refresh_devices()
+    assert ui.device_table.rowCount() == 250
+    assert ui._stat_values["total"].text() == "16382"
+    assert ui.device_next.isEnabled() and not ui.device_previous.isEnabled()
+    first_mac = ui.device_table.item(0, Col.MAC).text()
+    ui.change_device_page(65)
+    assert ui.device_table.rowCount() == 132
+    assert not ui.device_next.isEnabled() and ui.device_previous.isEnabled()
+    last_page_mac = ui.device_table.item(0, Col.MAC).text()
+    assert last_page_mac != first_mac
+    ui.device_table.item(0, Col.TRUSTED).setCheckState(Qt.Checked)
+    assert repository.get_device(last_page_mac).trusted
+    assert not repository.get_device(first_mac).trusted
+
+
+def test_scan_progress_is_visible_and_stale_signal_cannot_restore_old_network(window):
+    from core.arp_scanner import ScanResult
+    backend, ui, _ = window
+    page = ScanResult([], targets=["10.0.0.1"], total_hosts=16382,
+                      offset=0, end_offset=1024, network="10.0.0.0/18")
+    backend._emit_scan(page)
+    progress = backend.get_scan_progress()
+    assert "1.024/16.382" in ui.scan_progress_label.text()
+    assert not ui.scan_progress_label.isHidden()
+    backend._emit_connection(None)
+    ui.on_scan_progress_changed(progress)
+    assert ui.scan_progress_label.isHidden()

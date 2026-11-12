@@ -26,9 +26,7 @@ def validate(values):
     if not isinstance(result["retention_days"], int):
         raise ValueError("Số ngày giữ lịch sử phải là số nguyên.")
     if result["scan_cidr"]:
-        net = ipaddress.IPv4Network(result["scan_cidr"], strict=False)
-        if net.num_addresses > 1024:
-            raise ValueError("Dải quét tùy chọn tối đa 1.024 địa chỉ.")
+        ipaddress.IPv4Network(result["scan_cidr"], strict=False)
     for key in ("interface_name", "network_label", "scan_cidr"):
         if not isinstance(result[key], str) or len(result[key]) > 200:
             raise ValueError(f"{key} không hợp lệ.")

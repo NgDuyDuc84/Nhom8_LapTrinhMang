@@ -6,7 +6,7 @@ Báo cáo chi tiết từng nhóm: [remediation-report-2026-11-12.md](remediatio
 - MAC, ARP, OUI, hostname và dịch vụ tự công bố không xác thực danh tính. Pin router là quyết định sau khi người dùng đối chiếu thiết bị thật. Hồ sơ Windows là ngữ cảnh lưu trữ, không phải ranh giới xác thực chống giả mạo.
 - Một đích ICMP và một hop sau gateway không chứng minh DNS/HTTP/băng thông hoặc nguyên nhân ISP. Các kết luận được trình bày theo bằng chứng và mức nghi ngờ.
 - Wi-Fi là gợi ý từ AP/tín hiệu; chưa đo phổ, channel width, tải hay loại AP của chính người dùng. Band không rõ giữ Unknown.
-- Vượt 1.024 địa chỉ cần chọn CIDR nhỏ; mỗi lượt tối đa 4.096 claim và mỗi hồ sơ tối đa 10.000 thiết bị. Vượt ngân sách báo lỗi, giữ kết quả trước và không suy ra Offline từ lượt thiếu dữ liệu.
+- Subnet lớn được phủ dần từng phần 1.024 địa chỉ; không có trần 1.024 host cho cả subnet. Mỗi phần tối đa 4.096 claim; ngân sách hồ sơ tăng theo subnet (ít nhất 10.000 hoặc 4 lần số địa chỉ). Claim/MAC vượt ngân sách vẫn bị báo lỗi và không suy ra Offline từ phần thiếu dữ liệu. Một vòng quét mạng lớn mất nhiều thời gian hơn mạng nhỏ; ba lần vắng mặt tính theo lần IP đó thực sự được quét.
 - Khi Windows không trả hồ sơ, cần nhãn mạng dự phòng riêng. Nhãn dự phòng không tự xác thực hoặc tự đổi nếu hệ điều hành không phân biệt mạng.
 - Không thể cưỡng bức kết thúc một lời gọi driver bị treo vĩnh viễn trong Python. API stop không báo đã dừng hay đóng CSDL khi worker vẫn còn sống.
 - Thông báo từ xa cần opt-in, token và quyền của nhà cung cấp; chưa thử gửi thật. Queue RAM chưa bảo đảm giao sau khi ứng dụng tắt; OA token chưa tự refresh.

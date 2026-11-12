@@ -22,11 +22,11 @@ import threading
 import time
 from dataclasses import dataclass
 
-from config import ARP_ROUNDS, ARP_TIMEOUT_SEC
+from config import ARP_ROUNDS, ARP_TIMEOUT_SEC, SCAN_HOSTS_PER_PASS
 from core.interfaces import NetInterface, get_subnet_hosts
 from core.arp_validation import valid_arp_source
 
-__all__ = ["ScanEntry", "scan_subnet"]
+__all__ = ["ScanEntry", "ScanResult", "scan_subnet"]
 
 # Đây là thời hạn tối đa; bộ bắt gói sẵn sàng thì gửi ngay, không ngủ cố định.
 SNIFFER_START_TIMEOUT_SEC = 3.0
@@ -40,6 +40,25 @@ class ScanEntry:
     ip: str
     mac: str
     is_self: bool = False
+
+
+class ScanResult(list[ScanEntry]):
+    """Kết quả một phần quét, kèm chính xác các IP đã kiểm tra."""
+
+    def __init__(self, entries, *, targets, total_hosts, offset, end_offset, network):
+        super().__init__(entries)
+        self.targets = frozenset(targets)
+        self.total_hosts = total_hosts
+        self.offset = offset
+        self.end_offset = end_offset
+        self.next_offset = 0 if end_offset >= total_hosts else end_offset
+        self.network = str(network)
+
+    @property
+    def progress(self):
+        return {"network": self.network, "total_hosts": self.total_hosts,
+                "completed_hosts": self.end_offset, "batch_hosts": self.end_offset - self.offset,
+                "sweep_complete": self.next_offset == 0}
 
 
 def _scapy_iface(iface: NetInterface):
@@ -121,8 +140,9 @@ def scan_subnet(
     timeout: float = ARP_TIMEOUT_SEC,
     rounds: int = ARP_ROUNDS,
     stop_event: threading.Event | None = None,
-) -> list[ScanEntry]:
-    """Quét toàn bộ subnet của ``iface`` bằng ARP request broadcast.
+    start_offset: int = 0,
+) -> ScanResult:
+    """Quét phần kế tiếp của subnet bằng ARP, tối đa SCAN_HOSTS_PER_PASS địa chỉ.
 
     Đầu vào: ``iface`` là card đang dùng; ``timeout`` là thời gian chờ phản hồi mỗi
     vòng (giây); ``rounds`` là số vòng gửi (gộp kết quả để giảm sót thiết bị).
@@ -131,11 +151,17 @@ def scan_subnet(
     sẵn sàng, còn hoạt động suốt lượt quét và đã dừng thành công.
 
     Ném ``RuntimeError`` với thông báo tiếng Việt nếu không đủ quyền, thiếu Npcap,
-    hoặc capture lỗi/hết thời gian chờ. Ném ``ValueError`` nếu subnet quá lớn.
+    hoặc capture lỗi/hết thời gian chờ. Subnet lớn được chia phần, không bị từ chối.
     """
     from scapy.all import ARP, Ether, AsyncSniffer, sendp
 
-    hosts = get_subnet_hosts(iface)
+    all_hosts = get_subnet_hosts(iface)
+    offset = start_offset % len(all_hosts)
+    end_offset = min(offset + SCAN_HOSTS_PER_PASS, len(all_hosts))
+    hosts = list(all_hosts[offset:end_offset])
+    # Router được kiểm tra mỗi phần, kể cả khi nằm ở phần khác của subnet.
+    if iface.gateway and iface.gateway in all_hosts and iface.gateway not in hosts:
+        hosts.append(iface.gateway)
     host_set = set(hosts)
     scapy_iface = _scapy_iface(iface)
     found: set[tuple[str, str]] = set()
@@ -173,18 +199,17 @@ def scan_subnet(
     try:
         sniffer.start()
         _wait_capture_ready(sniffer, ready)
-        requests = [Ether(src=iface.mac, dst="ff:ff:ff:ff:ff:ff") /
-                    ARP(hwsrc=iface.mac, psrc=iface.ip, pdst=ip) for ip in hosts]
         for _ in range(max(1, int(rounds))):
             _check_capture(sniffer)
-            # Giãn cách 1 ms/gói: gửi dồn 254 gói một lúc dễ bị router/AP bỏ bớt.
-            if stop_event is None:
+            # Chỉ dựng tối đa 64 packet một lúc, kiểm tra hủy/sức khỏe giữa các lô.
+            for batch_start in range(0, len(hosts), 64):
+                if stop_event is not None and stop_event.is_set():
+                    raise RuntimeError("Đã hủy quét mạng.")
+                _check_capture(sniffer)
+                requests = [Ether(src=iface.mac, dst="ff:ff:ff:ff:ff:ff") /
+                            ARP(hwsrc=iface.mac, psrc=iface.ip, pdst=ip)
+                            for ip in hosts[batch_start:batch_start+64]]
                 sendp(requests, iface=scapy_iface, verbose=0, inter=0.001)
-            else:
-                for offset in range(0, len(requests), 64):
-                    if stop_event.is_set():
-                        raise RuntimeError("Đã hủy quét mạng.")
-                    sendp(requests[offset:offset+64], iface=scapy_iface, verbose=0, inter=0.001)
             # join(timeout) chờ phản hồi nhưng tỉnh ngay nếu capture chết và
             # chuyển tiếp lỗi Scapy; hết timeout vẫn cần capture còn hoạt động.
             deadline = time.monotonic() + timeout
@@ -221,31 +246,17 @@ def scan_subnet(
     for entry in entries:
         entry.is_self = entry.ip == iface.ip and entry.mac == iface.mac.lower()
     entries.sort(key=lambda entry: (ipaddress.IPv4Address(entry.ip), entry.mac))
-    return entries
+    return ScanResult(entries, targets=host_set, total_hosts=len(all_hosts),
+                      offset=offset, end_offset=end_offset,
+                      network=getattr(all_hosts, "network", f"{iface.ip}/{iface.netmask}"))
 
 
 def _main() -> int:
-    """Quét thử và in kết quả (tiện cho A chạy tay khi cần)."""
+    """Dùng chung CLI để quét hết các phần, không chỉ phần đầu của mạng lớn."""
     from core.console import setup_console_encoding
-    from core.interfaces import get_active_interface, get_warnings
-
+    from main import run_scan
     setup_console_encoding()
-    for warning in get_warnings():
-        print(f"Cảnh báo: {warning}")
-    try:
-        iface = get_active_interface()
-        started = time.perf_counter()
-        entries = scan_subnet(iface)
-    except (RuntimeError, ValueError) as exc:
-        print(f"LỖI: {exc}")
-        return 1
-    elapsed = time.perf_counter() - started
-    print(f"Quét {iface.name} ({iface.ip}/{iface.netmask}) mất {elapsed:.1f} giây, "
-          f"thấy {len(entries)} thiết bị:")
-    for entry in entries:
-        note = "  (máy này)" if entry.is_self else ""
-        print(f"  {entry.ip:<16}{entry.mac}{note}")
-    return 0
+    return run_scan()
 
 
 if __name__ == "__main__":

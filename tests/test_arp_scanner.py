@@ -1,6 +1,7 @@
 """Hồi quy lỗi 01 với luồng AsyncSniffer thật, thay phần I/O mạng bằng dữ liệu giả."""
 
 import threading
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -164,6 +165,36 @@ def test_healthy_capture_without_replies_is_a_valid_self_only_scan(capture, ifac
     assert scanner.scan_subnet(iface, timeout=0, rounds=1) == [
         scanner.ScanEntry(iface.ip, iface.mac, is_self=True),
     ]
+    assert not capture.instances[-1].thread.is_alive()
+
+
+def test_large_subnet_scans_bounded_packets_and_reports_actual_coverage(monkeypatch, capture, iface):
+    from core.interfaces import get_subnet_hosts
+    monkeypatch.setattr(scanner, "get_subnet_hosts", get_subnet_hosts)
+    large = replace(iface, ip="10.0.1.9", gateway="10.0.0.1", netmask="255.255.192.0")
+    capture.packets = [scapy.ARP(op=2, psrc="10.0.4.1", hwsrc="00:11:22:33:44:66", pdst=large.ip),
+                       scapy.ARP(op=2, psrc="10.0.30.1", hwsrc="00:11:22:33:44:77", pdst=large.ip)]
+    result = scanner.scan_subnet(large, timeout=0, rounds=1, start_offset=1024)
+    assert result.total_hosts == 16382
+    assert result.next_offset == 2048
+    assert result.progress["completed_hosts"] == 2048
+    sent = [packet[scapy.ARP].pdst for call in capture.send.call_args_list for packet in call.args[0]]
+    assert len(sent) == 1025 and len(set(sent)) == 1025
+    assert sent[0] == "10.0.4.1" and sent[-1] == large.gateway
+    assert max(len(call.args[0]) for call in capture.send.call_args_list) <= 64
+    assert result.targets == set(sent)
+    assert {entry.ip for entry in result} == {large.ip, "10.0.4.1"}
+
+
+def test_large_subnet_can_be_cancelled_between_packet_batches(monkeypatch, capture, iface):
+    from core.interfaces import get_subnet_hosts
+    monkeypatch.setattr(scanner, "get_subnet_hosts", get_subnet_hosts)
+    large = replace(iface, ip="10.0.1.9", gateway="10.0.0.1", netmask="255.0.0.0")
+    stop = threading.Event()
+    capture.send.side_effect = lambda *args, **kwargs: stop.set()
+    with pytest.raises(RuntimeError, match="hủy"):
+        scanner.scan_subnet(large, timeout=0, rounds=1, stop_event=stop)
+    capture.send.assert_called_once()
     assert not capture.instances[-1].thread.is_alive()
 
 

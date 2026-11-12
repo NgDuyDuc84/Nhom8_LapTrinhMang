@@ -196,7 +196,7 @@ def test_offline_refresh_reports_error_then_allows_retry(running_network):
 
 
 @pytest.mark.parametrize("error", [
-    ValueError("Dải mạng /18 vượt giới hạn quét 1024 host."),
+    ValueError("Dải quét đã chọn phải nằm trong subnet của card hiện tại."),
     RuntimeError("Không mở được card mạng để quét."),
 ])
 def test_scan_failure_is_visible_and_refresh_button_recovers(running_network, error):

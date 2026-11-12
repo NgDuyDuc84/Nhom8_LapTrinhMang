@@ -48,6 +48,7 @@ class BackendBase(QObject):
     connection_changed = Signal(object)  # dict: card, IP, gateway hiện tại
     measurement_changed = Signal(object) # dict: kết quả và lỗi đo từng chu kỳ
     devices_refreshed = Signal()         # bảng thiết bị có dữ liệu mới
+    scan_progress_changed = Signal(object)  # phần subnet đã kiểm tra trong vòng quét
     network_refresh_changed = Signal(object)  # dict: tiến độ/kết quả làm mới theo yêu cầu
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -71,6 +72,9 @@ class BackendBase(QObject):
 
     def get_refresh_status(self) -> dict:
         return {"request_id": 0, "running": False, "message": "", "errors": []}
+
+    def get_scan_progress(self) -> dict:
+        return {}
 
     def get_latest_measurements(self) -> dict:
         return {}
@@ -165,6 +169,8 @@ class Backend(BackendBase):
         self._connection: dict = {}
         self._latest_measurements: dict = {}
         self._session_macs: set[str] = set()
+        self._scan_progress: dict = {}
+        self._refresh_scan_partial = False
         self._refresh_pending: set[str] = set()
         self._refresh_errors: list[str] = []
         self._refresh_scan_macs: set[str] | None = None
@@ -269,6 +275,7 @@ class Backend(BackendBase):
             self._latest_measurements = {}
             self._latest_diagnosis = None
             self._session_macs.clear()
+            self._scan_progress = {}
             self._services.clear()
             self._last_traceroute = None
             self._diagnoses.clear()
@@ -338,8 +345,10 @@ class Backend(BackendBase):
             self._latest_measurements = {}
             self._latest_diagnosis = None
             self._session_macs.clear()
+            self._scan_progress = {}
             generation = self._generation
         self.connection_changed.emit({**status, "generation": generation})
+        self.scan_progress_changed.emit(self.get_scan_progress())
 
     def _emit_measurements(self, results) -> None:
         monitor = self._ping_monitor
@@ -372,6 +381,10 @@ class Backend(BackendBase):
             if self._scoped and current_network() != self._storage_network:
                 return
             self._session_macs.update(entry.mac.lower() for entry in entries)
+            progress = getattr(entries, "progress", {})
+            if progress:
+                self._scan_progress = {**progress, "generation": self._generation}
+        self.scan_progress_changed.emit(self.get_scan_progress())
         self.devices_refreshed.emit()
 
     def get_connection_status(self) -> dict:
@@ -381,6 +394,10 @@ class Backend(BackendBase):
     def get_refresh_status(self) -> dict:
         with self._state_lock:
             return {**self._refresh_status, "errors": list(self._refresh_status["errors"])}
+
+    def get_scan_progress(self) -> dict:
+        with self._state_lock:
+            return dict(self._scan_progress)
 
     def refresh_network(self) -> bool:
         """Chạy trên các worker có sẵn; không tạo scan hoặc ping song song mới."""
@@ -401,6 +418,7 @@ class Backend(BackendBase):
             self._refresh_errors = []
             self._refresh_scan_macs = None
             self._refresh_scan_connection = None
+            self._refresh_scan_partial = False
             self._session_macs.clear()
             self._latest_measurements = {}
             self._latest_diagnosis = None
@@ -423,6 +441,7 @@ class Backend(BackendBase):
             if "scan" not in self._refresh_pending:
                 return
             if error is None and entries is not None:
+                self._refresh_scan_partial = getattr(entries, "total_hosts", len(entries)) > len(getattr(entries, "targets", entries))
                 self._refresh_scan_macs = {entry.mac.lower() for entry in entries}
                 self._refresh_scan_connection = (
                     iface.name, iface.ip, iface.netmask, iface.gateway,
@@ -456,6 +475,8 @@ class Backend(BackendBase):
                 message = "Làm mới gặp lỗi. " + " | ".join(self._refresh_errors)
             else:
                 message = f"Đã làm mới mạng lúc {now():%H:%M:%S}."
+                if self._refresh_scan_partial:
+                    message += " Đã quét phần tiếp theo; ứng dụng tiếp tục phủ dần toàn subnet."
             self._refresh_status = {
                 "request_id": self._refresh_request_id,
                 "running": False,

@@ -51,7 +51,18 @@ def run_scan() -> int:
         iface = get_active_interface()
         print(f"Đang quét {iface.name} ({iface.ip}/{iface.netmask}), chờ chút...")
         started = time.perf_counter()
-        entries = scan_subnet(iface)
+        found, offset = {}, 0
+        while True:
+            page = scan_subnet(iface, start_offset=offset)
+            found.update(((entry.ip, entry.mac), entry) for entry in page)
+            progress = getattr(page, "progress", {})
+            if progress:
+                print(f"Đã kiểm tra {progress['completed_hosts']:,}/{progress['total_hosts']:,} địa chỉ.")
+            offset = getattr(page, "next_offset", 0)
+            if not offset:
+                break
+        from ipaddress import IPv4Address
+        entries = sorted(found.values(), key=lambda entry: (IPv4Address(entry.ip), entry.mac))
     except (RuntimeError, ValueError) as exc:
         print(f"LỖI: {exc}")
         return 1

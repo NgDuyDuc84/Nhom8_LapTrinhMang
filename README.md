@@ -48,7 +48,7 @@ Tab Cảnh báo có tìm kiếm, trang trước/sau và đánh dấu đã xử l
 - Lưu riêng quan sát IP-MAC, kể cả nhiều MAC cùng nhận IP hoặc một MAC có nhiều IP. Không áp UNIQUE IP toàn cục.
 - Ping lưu address, session và trạng thái `ok`, `timeout`, `measurement_error`, `offline`, `unavailable`. Lỗi đo/không có dữ liệu không được tính thành mất gói 0% hoặc 100%.
 - Mặc định giữ lịch sử chi tiết 30 ngày; bảo trì khi mở hồ sơ và theo giờ lúc theo dõi. Giữ metadata người dùng và trạng thái biên cần thiết. Hồ sơ không theo dõi không bị tự mở để xóa dữ liệu.
-- Mỗi hồ sơ có ngân sách 10.000 thiết bị đã biết; mỗi lượt tối đa 4.096 claim, detector có giới hạn TTL/số mục và cảnh báo có ngân sách tổng thể. Vượt ngân sách làm lượt lỗi rõ ràng, không nhận một phần rồi suy ra Offline.
+- Ngân sách hồ sơ tự tăng theo subnet: tối thiểu 10.000 hoặc 4 lần số địa chỉ của subnet, lấy số lớn hơn (`/18`: 65.536 hồ sơ MAC). Mỗi phần quét tối đa 4.096 claim; detector có TTL/số mục và cảnh báo có ngân sách tổng thể. Các ngân sách chống claim/MAC bất thường không phải giới hạn số host của subnet.
 - Thời gian hiển thị/lưu trữ là GMT+7. API nhận datetime có timezone sẽ chuyển về GMT+7; giữ microsecond.
 
 Nút làm mới giữ metadata của **cùng hồ sơ**. Dữ liệu cũ không bị xóa nếu danh sách của hồ sơ mới ban đầu trống: chọn hồ sơ lịch sử cũ trong Công cụ để xem lại.
@@ -65,7 +65,13 @@ CSV bảo vệ các trường text bắt đầu bằng dấu có thể được 
 
 Mở **Công cụ → Cài đặt** để chọn tên card, CIDR, đích ngoài, chu kỳ, ngưỡng RTT/loss, retention và nhãn hồ sơ. Cấu hình được validate tại `data/settings.json`, áp dụng khi mở lại. File cấu hình hỏng được báo rõ và dùng mặc định để vẫn mở được giao diện sửa lại.
 
-Subnet lớn hơn 1.024 host cần chọn một CIDR nhỏ nằm trong subnet đó, ví dụ một `/24`; ứng dụng không tự tăng tải quét toàn mạng lớn. Địa chỉ ngoài CIDR đã chọn không bị tính là vắng mặt. Các probe ping độc lập chạy đồng thời nhưng chu kỳ vẫn tuần tự. Cửa sổ là số mẫu có thời gian thực, không mặc định 30 mẫu luôn tương đương 60 giây.
+Để trống **Dải quét tùy chọn** để phủ toàn subnet của card, kể cả `/18` hoặc lớn hơn. Có thể nhập CIDR nhỏ hơn nếu muốn; CIDR vẫn phải nằm trong subnet thực. Dải IP được tính lười, không tạo danh sách hàng triệu địa chỉ trong RAM.
+
+Mỗi phần kiểm tra tối đa 1.024 địa chỉ, dựng/gửi từng lô 64 packet và kiểm tra hủy giữa các lô. Router được kiểm tra mỗi phần nếu thuộc dải đã chọn. Với mạng lớn, worker nghỉ 1 giây rồi tiếp tục phần kế tiếp; sau phần cuối mới nghỉ theo chu kỳ quét. Kết quả và tiến độ được cập nhật sau từng phần thành công. Nút **Làm mới mạng** quét phần kế tiếp, không đặt lại về đầu khi vẫn ở cùng mạng.
+
+Ví dụ `/18` có 16.382 địa chỉ host, được phủ bằng 16 phần; đây là số địa chỉ có thể kiểm tra, không phải số thiết bị chắc chắn đang hoạt động. Thời gian phủ phụ thuộc Npcap, phản hồi và tốc độ gửi; mạng lớn không được cập nhật tức thì. Chỉ IP nằm trong phần đã quét thành công mới tăng số lần vắng mặt; Offline cần ba lần thực sự kiểm tra mà không thấy. Bảng thiết bị phân trang 250 dòng, các ô tổng vẫn tính trên toàn hồ sơ. CLI `scan` chạy các phần đến hết một vòng rồi in kết quả gộp.
+
+Các probe ping độc lập chạy đồng thời nhưng chu kỳ vẫn tuần tự. Cửa sổ là số mẫu có thời gian thực, không mặc định 30 mẫu luôn tương đương 60 giây.
 
 ARP không bao phủ IPv6, VLAN/thiết bị sau router hoặc client isolation. Thiết bị ngủ/im lặng có thể vắng ARP. Online/Offline là kết quả quan sát. MAC có thể bị giả mạo; ICMP không kiểm tra DNS, HTTP, captive portal hay băng thông. Quyền bắt gói hiện áp dụng cho tiến trình giám sát; chế độ lịch sử không bật các dịch vụ đó.
 

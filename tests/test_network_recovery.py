@@ -72,9 +72,11 @@ def test_preferred_card_does_not_silently_switch_network(monkeypatch, iface):
         interfaces.get_active_interface(iface)
 
 
-def test_large_subnet_rejected_before_host_enumeration(iface):
-    with pytest.raises(ValueError, match='MAX_SCAN_HOSTS'):
-        interfaces.get_subnet_hosts(replace(iface, netmask='255.0.0.0'))
+def test_large_subnet_is_lazy_instead_of_rejected(iface):
+    hosts = interfaces.get_subnet_hosts(replace(iface, ip='10.0.0.9', netmask='255.0.0.0'))
+    assert len(hosts) == 16777214
+    assert hosts[0] == '10.0.0.1' and hosts[-1] == '10.255.255.254'
+    assert len(hosts[1000:2024]) == 1024
 
 
 @pytest.fixture

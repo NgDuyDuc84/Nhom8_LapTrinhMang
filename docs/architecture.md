@@ -30,6 +30,8 @@ Mỗi network có file SQLite riêng dưới `data/networks`; DB gốc là legac
 
 Scan xác nhận capture sẵn sàng, kiểm tra các lỗi nền/cleanup và giữ đầy đủ IP-MAC claim. Đọc lại kết nối/generation trước transaction; khóa commit chung với backend ngăn đổi phiên giữa bước kiểm tra và cập nhật. Scan lỗi/hủy không tăng misses; quét một dải nhỏ không đếm vắng địa chỉ ngoài dải.
 
+`IPv4Hosts` là Sequence tính lười với kích thước/truy cập/slice không liệt kê subnet. `ScanResult` giữ tập IP đã gửi, tổng số host và vị trí phần tiếp theo. ScanLoop chỉ tiến cursor sau commit thành công, đặt lại khi đổi kết nối; mỗi phần tối đa 1.024 host cộng gateway, packet được dựng theo lô 64. Phần kế tiếp của mạng lớn chạy sau 1 giây; hết vòng mới dùng chu kỳ quét thông thường. UI có tiến độ theo generation và bảng phân trang 250 dòng; dữ liệu/tổng thống kê không bị cắt ở 250 thiết bị.
+
 Upsert, hiện diện, nhận diện cơ bản và quyết định cảnh báo nằm trong transaction nghiệp vụ. Callback chạy sau commit và được cô lập lỗi; UI coalesce cập nhật. Các signal kết nối/chẩn đoán/phép đo trễ được so với trạng thái mới nhất. Signal cảnh báo có provenance mạng.
 
 Stop giữ handle đến khi join xong; timeout ném lỗi và giữ tài nguyên. Backend chỉ đóng SQLite sau khi worker đã dừng. Khóa process ngăn hai tiến trình giám sát cùng bộ dữ liệu. Native driver treo vĩnh viễn vẫn là giới hạn của tiến trình Python.

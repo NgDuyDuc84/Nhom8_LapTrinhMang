@@ -38,6 +38,6 @@ TRACE_MAX_HOPS = 15
 ALERT_DEDUP_MINUTES = 30      # không lặp lại cùng loại cảnh báo cho cùng thiết bị trong bao lâu
 
 # --- Giới hạn và đường dẫn ---
-MAX_SCAN_HOSTS = 1024         # subnet lớn hơn ngưỡng này thì từ chối quét
-MAX_KNOWN_DEVICES = 10000    # ngân sách hồ sơ một mạng, không ghi vô hạn từ MAC tự khai báo
+SCAN_HOSTS_PER_PASS = 1024   # mỗi phần quét; worker tiếp tục phần kế đến, không chặn subnet lớn
+MIN_DEVICE_CAPACITY = 10000  # ngân sách hồ sơ tối thiểu; tăng theo số host của subnet
 DB_PATH = str(ROOT / "data" / "netguard.db")

@@ -18,7 +18,7 @@ import struct
 from ctypes import wintypes
 from dataclasses import dataclass
 
-from config import MAX_SCAN_HOSTS
+from core.scan_targets import IPv4Hosts
 
 # Dấu hiệu nhận biết card ảo (so khớp trên tên + mô tả, không phân biệt hoa thường).
 VIRTUAL_MARKERS = (
@@ -336,12 +336,8 @@ def get_active_interface(preferred: NetInterface | None = None) -> NetInterface:
     return candidates[0]
 
 
-def get_subnet_hosts(iface: NetInterface) -> list[str]:
-    """Liệt kê IP host trong subnet của ``iface`` (bỏ địa chỉ mạng và broadcast).
-
-    Ném ``ValueError`` nếu card thiếu IP/mặt nạ, hoặc subnet có nhiều hơn
-    ``MAX_SCAN_HOSTS`` host (tránh quét cả mạng /8).
-    """
+def get_subnet_hosts(iface: NetInterface) -> IPv4Hosts:
+    """Dải host tính lười, không từ chối subnet lớn hay nạp cả dải vào RAM."""
     if not iface.ip or not iface.netmask:
         raise ValueError(
             f"Card '{iface.name}' chưa có IPv4/mặt nạ mạng nên không tính được dải quét."
@@ -351,20 +347,13 @@ def get_subnet_hosts(iface: NetInterface) -> list[str]:
     except ValueError as exc:
         raise ValueError(f"Không hiểu địa chỉ {iface.ip}/{iface.netmask}: {exc}") from exc
 
-    host_count = network.num_addresses if network.prefixlen >= 31 else network.num_addresses - 2
     from config import SETTINGS
     if SETTINGS["scan_cidr"]:
         selected = ipaddress.IPv4Network(SETTINGS["scan_cidr"], strict=False)
         if not selected.subnet_of(network):
             raise ValueError("Dải quét đã chọn phải nằm trong subnet của card hiện tại.")
         network = selected
-        host_count = network.num_addresses if network.prefixlen >= 31 else network.num_addresses-2
-    if host_count > MAX_SCAN_HOSTS:
-        raise ValueError(
-            f"Dải {network} có {host_count} địa chỉ host, vượt giới hạn "
-            f"MAX_SCAN_HOSTS = {MAX_SCAN_HOSTS}. Hãy chọn mạng nhỏ hơn (ví dụ /24)."
-        )
-    return [str(host) for host in network.hosts()]
+    return IPv4Hosts(network)
 
 
 def check_environment(require_network: bool = True) -> list[str]:

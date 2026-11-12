@@ -139,6 +139,8 @@ class MainWindow(QMainWindow):
         self._device_rows: dict[str, int] = {}
         self._refreshing = False
         self._device_cache = {}
+        self._device_offset = 0
+        self._device_page_size = 250
         self._device_timer = QTimer(self)
         self._device_timer.setSingleShot(True)
         self._device_timer.timeout.connect(self.refresh_devices)
@@ -163,7 +165,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addWidget(toolbar_spacer)
 
         self.refresh_action = QPushButton("Làm mới mạng")
-        self.refresh_action.setToolTip("Đọc lại kết nối đang dùng, quét thiết bị và lấy mẫu đo mới.")
+        self.refresh_action.setToolTip("Đọc lại kết nối và đo mới. Với mạng lớn, quét phần kế tiếp; xem tiến độ phủ subnet bên dưới.")
         self.refresh_action.clicked.connect(self.request_network_refresh)
         self.toolbar.addWidget(self.refresh_action)
 
@@ -214,6 +216,11 @@ class MainWindow(QMainWindow):
         self.refresh_status_label.setWordWrap(True)
         self.refresh_status_label.hide()
         main_layout.addWidget(self.refresh_status_label)
+        self.scan_progress_label = QLabel()
+        self.scan_progress_label.setTextFormat(Qt.PlainText)
+        self.scan_progress_label.setWordWrap(True)
+        self.scan_progress_label.hide()
+        main_layout.addWidget(self.scan_progress_label)
         self.environment_label = QLabel("\n".join(warnings or []))
         self.environment_label.setObjectName("environment")
         self.environment_label.setTextFormat(Qt.PlainText)
@@ -275,6 +282,7 @@ class MainWindow(QMainWindow):
         self.refresh_alerts()
         self.refresh_diagnosis()
         self.on_network_refresh_changed(backend.get_refresh_status())
+        self.on_scan_progress_changed(backend.get_scan_progress())
 
     def _connect_backend_signals(self) -> None:
         self.backend.device_updated.connect(self.on_device_updated)
@@ -285,6 +293,7 @@ class MainWindow(QMainWindow):
         self.backend.measurement_changed.connect(self.on_measurement_changed)
         self.backend.devices_refreshed.connect(self.schedule_devices)
         self.backend.network_refresh_changed.connect(self.on_network_refresh_changed)
+        self.backend.scan_progress_changed.connect(self.on_scan_progress_changed)
         self.backend.service_status_changed.connect(self.on_service_status)
         self.backend.report_finished.connect(self.on_report_finished)
         self.backend.utility_finished.connect(self.report_text.setPlainText)
@@ -367,6 +376,22 @@ class MainWindow(QMainWindow):
         self.device_table.itemChanged.connect(self._handle_device_item_changed)
         self._toggle_network_columns(False)
         layout.addWidget(self.device_table)
+        pages = QHBoxLayout()
+        self.device_page_label = QLabel()
+        pages.addWidget(self.device_page_label, 1)
+        self.device_previous = QPushButton("Trang trước")
+        self.device_next = QPushButton("Trang sau")
+        self.device_previous.clicked.connect(lambda: self.change_device_page(-1))
+        self.device_next.clicked.connect(lambda: self.change_device_page(1))
+        pages.addWidget(self.device_previous)
+        pages.addWidget(self.device_next)
+        layout.addLayout(pages)
+
+    def change_device_page(self, direction):
+        if self.device_table.state() == QAbstractItemView.EditingState:
+            self.device_table.setFocus()  # Chốt editor trước khi đổi trang.
+        self._device_offset = max(0, self._device_offset + direction * self._device_page_size)
+        self.refresh_devices()
 
     def _toggle_network_columns(self, visible: bool) -> None:
         for column in (Col.MAC, Col.IP):
@@ -506,16 +531,23 @@ class MainWindow(QMainWindow):
         self.device_table.setUpdatesEnabled(False)
         try:
             self._device_cache = {d.mac: d for d in devices}
+            self._device_offset = min(self._device_offset, max(0, (len(devices)-1)//self._device_page_size)*self._device_page_size)
+            start, end = self._device_offset, self._device_offset + self._device_page_size
+            page_devices, page_statuses = devices[start:end], statuses[start:end]
+            page_macs = {device.mac for device in page_devices}
+            self.device_page_label.setText(f"Hiện {start+1 if devices else 0}–{min(end, len(devices))} / {len(devices)} thiết bị đã biết")
+            self.device_previous.setEnabled(start > 0)
+            self.device_next.setEnabled(end < len(devices))
             for row in reversed(range(self.device_table.rowCount())):
                 mac_item = self.device_table.item(row, Col.MAC)
-                if mac_item and mac_item.text() not in self._device_cache:
+                if mac_item and mac_item.text() not in page_macs:
                     self.device_table.removeRow(row)
             self._device_rows = {self.device_table.item(r, Col.MAC).text(): r for r in range(self.device_table.rowCount())}
             for key, value in {"total": len(devices), "online": statuses.count("Online"),
                                "pending": sum(v.startswith("Chưa xác minh") for v in statuses),
                                "untrusted": sum(not d.trusted for d in devices)}.items():
                 self._stat_values[key].setText(str(value))
-            for device, status in zip(devices, statuses):
+            for device, status in zip(page_devices, page_statuses):
                 row = self._device_rows.get(device.mac)
                 if row is None:
                     row = self.device_table.rowCount()
@@ -667,6 +699,8 @@ class MainWindow(QMainWindow):
             return
         self._measurements = {}
         self._latest_diagnosis = None
+        self._device_offset = 0
+        self.on_scan_progress_changed(self.backend.get_scan_progress())
         if status.get("connected"):
             self.connection_label.setText(
                 f"Card: <b style='color:#1E293B'>{escape(status['name'])}</b> &nbsp; · &nbsp; "
@@ -827,6 +861,22 @@ class MainWindow(QMainWindow):
             self.report_text.setPlainText("Đang tổng hợp dữ liệu và dựng PDF ở nền…")
         except Exception as exc:  # pragma: no cover - UI-level handling
             QMessageBox.critical(self, "Lỗi xuất báo cáo", str(exc))
+
+    @Slot(object)
+    def on_scan_progress_changed(self, progress):
+        if progress != self.backend.get_scan_progress():
+            return
+        if not progress:
+            self.scan_progress_label.hide()
+            return
+        total, completed = progress["total_hosts"], progress["completed_hosts"]
+        def number(value):
+            return f"{value:,}".replace(",", ".")
+        text = f"Dải {progress['network']}: đã kiểm tra {number(completed)}/{number(total)} địa chỉ trong vòng quét ({completed/total:.1%})."
+        if total > progress["batch_hosts"]:
+            text += " Thiết bị được bổ sung dần; chỉ địa chỉ đã quét mới được tính vắng mặt."
+        self.scan_progress_label.setText(text)
+        self.scan_progress_label.show()
 
     @Slot(object)
     def on_service_status(self, status):

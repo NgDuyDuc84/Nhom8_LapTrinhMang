@@ -1,6 +1,6 @@
 """Vòng quét định kỳ: quét ARP, cập nhật CSDL, cảnh báo thiết bị lạ.
 
-Mỗi chu kỳ ``SCAN_INTERVAL_SEC`` giây:
+Mỗi phần quét (mạng lớn tiếp tục sau 1 giây, hết vòng mới nghỉ theo chu kỳ):
 1. Quét ARP subnet của card đang dùng.
 2. Tra hãng ngoại tuyến và nhận diện vai trò; hẹn bổ sung tên/dịch vụ ở nền.
 3. Cập nhật CSDL, đánh dấu online; thiết bị vắng mặt ``OFFLINE_AFTER_MISSES``
@@ -25,9 +25,9 @@ import threading
 import time
 from typing import Callable
 
-from config import OFFLINE_AFTER_MISSES, SCAN_INTERVAL_SEC, MAX_KNOWN_DEVICES, SETTINGS
-from core.arp_scanner import ScanEntry, scan_subnet
-from core.interfaces import NetInterface, get_active_interface
+from config import OFFLINE_AFTER_MISSES, SCAN_INTERVAL_SEC, MIN_DEVICE_CAPACITY
+from core.arp_scanner import ScanEntry, ScanResult, scan_subnet
+from core.interfaces import NetInterface, get_active_interface, get_subnet_hosts
 from db import repository
 from extras import mac_random
 from extras.device_identity import identify_device
@@ -82,7 +82,8 @@ class ScanLoop:
         self._on_refresh = on_refresh or (lambda iface, entries, error: None)
         self._on_identify = on_identify or (lambda iface, entries, force: None)
         self._network_key: tuple | None = None
-        self._scanner = scanner or (lambda chosen: scan_subnet(chosen, stop_event=self._stop_event))
+        self._scan_offset = 0
+        self._scanner = scanner or (lambda chosen: scan_subnet(chosen, stop_event=self._stop_event, start_offset=self._scan_offset))
         self._scoped = scoped
         self._owns_session = scoped and session_provider is None
         self._owned_session = ""
@@ -105,6 +106,7 @@ class ScanLoop:
         if self.is_running():
             return
         self._network_key = None
+        self._scan_offset = 0
         self._misses.clear()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="netguard-scan", daemon=True)
@@ -164,6 +166,8 @@ class ScanLoop:
                     _log(f"[kết quả làm mới quét mạng] {exc}")
             waited = time.perf_counter() - started
             remaining = self._interval - waited
+            if isinstance(entries, ScanResult) and entries.next_offset:
+                remaining = 1.0  # Tiếp tục phủ subnet lớn; nghỉ đủ chu kỳ sau phần cuối.
             if remaining > 0:
                 self._wake_event.wait(remaining)
 
@@ -192,12 +196,19 @@ class ScanLoop:
         with context, self._commit_lock:
             if generation != self._generation() or self._stop_event.is_set():
                 raise RuntimeError("Phiên kết nối đã thay đổi; bỏ kết quả quét cũ.")
-            return self._save_scan(iface, entries, reselect)
+            result = self._save_scan(iface, entries, reselect)
+            if isinstance(result, ScanResult):
+                self._scan_offset = result.next_offset
+            return result
 
     def _save_scan(self, iface, entries, reselect):
         moment = now()
         seen = set()
         events, alerts = [], []
+        # Ngân sách tăng theo subnet thực, không làm /18 đụng trần 10.000 hồ sơ.
+        network = ipaddress.IPv4Network(f"{iface.ip}/{iface.netmask}", strict=False)
+        capacity = max(MIN_DEVICE_CAPACITY, network.num_addresses * 4)
+        probe_range = entries.targets if isinstance(entries, ScanResult) else get_subnet_hosts(iface)
         misses_before = dict(self._misses)
         try:
             with transaction() as connection:
@@ -216,8 +227,8 @@ class ScanLoop:
                     is_new = existing is None
                     if is_new:
                         known_count += 1
-                        if known_count > MAX_KNOWN_DEVICES:
-                            raise RuntimeError("Đã đạt ngân sách 10.000 hồ sơ thiết bị của mạng này; bỏ lượt quét và giữ dữ liệu hiện tại. Sao lưu, giảm dải quét hoặc lập hồ sơ mới để kiểm tra lưu lượng bất thường.")
+                        if known_count > capacity:
+                            raise RuntimeError(f"Đã đạt ngân sách {capacity:,} hồ sơ MAC của mạng này; bỏ lượt quét và giữ dữ liệu hiện tại. Kiểm tra lưu lượng bất thường hoặc sao lưu hồ sơ.")
                     was_offline = existing is not None and not existing.online
                     if was_offline:
                         repository.pending_device_alert(mac, True)
@@ -245,8 +256,7 @@ class ScanLoop:
                 for device in repository.list_devices():
                     if device.mac in seen:
                         continue
-                    probe_range = ipaddress.ip_network(SETTINGS["scan_cidr"] or f"{iface.ip}/{iface.netmask}", strict=False)
-                    if ipaddress.ip_address(device.ip) not in probe_range:
+                    if device.ip not in probe_range:
                         continue  # Không suy ra vắng mặt cho địa chỉ không được quét.
                     misses = self._misses.get(device.mac, 0) + 1
                     self._misses[device.mac] = misses
@@ -287,5 +297,6 @@ class ScanLoop:
                         self._owned_session = repository.start_session(asdict(iface))
             if key != self._network_key:
                 self._misses.clear()
+                self._scan_offset = 0
             self._on_interface(iface)
             self._network_key = key
