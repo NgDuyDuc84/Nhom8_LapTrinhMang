@@ -1,0 +1,8 @@
+{
+  "name": "netguard-presentation-tools",
+  "private": true,
+  "type": "module",
+  "dependencies": { "sharp": "0.35.5" },
+  "peerDependencies": { "@oai/artifact-tool": "2.8.146" },
+  "peerDependenciesMeta": { "@oai/artifact-tool": { "optional": true } }
+}
