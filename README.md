@@ -75,6 +75,8 @@ Ví dụ `/18` có 16.382 địa chỉ host, được phủ bằng 16 phần; đ
 
 Các probe ping độc lập chạy đồng thời nhưng chu kỳ vẫn tuần tự. Cửa sổ là số mẫu có thời gian thực, không mặc định 30 mẫu luôn tương đương 60 giây.
 
+Chẩn đoán ổn định/nghi ngờ lỗi cần ba chu kỳ xác nhận liên tiếp trên cửa sổ đo. Nếu lỗi đo hoặc thiếu bằng chứng khiến không thể kết luận, ứng dụng chuyển ngay từ kết luận cũ sang **Chưa đủ dữ liệu**, không giữ nhãn ổn định hay nguyên nhân nghi ngờ trước đó. Lỗi socket không tính là mất gói; timeout của probe hợp lệ vẫn được tính. Chi tiết kiểm chứng: [chẩn đoán mạng](docs/diagnosis-validation.md).
+
 ARP không bao phủ IPv6, VLAN/thiết bị sau router hoặc client isolation. Thiết bị ngủ/im lặng có thể vắng ARP. Online/Offline là kết quả quan sát. MAC có thể bị giả mạo; ICMP không kiểm tra DNS, HTTP, captive portal hay băng thông. Quyền bắt gói hiện áp dụng cho tiến trình giám sát; chế độ lịch sử không bật các dịch vụ đó.
 
 ## Cảnh báo trong ứng dụng

@@ -35,6 +35,8 @@ Scan xác nhận capture sẵn sàng, kiểm tra các lỗi nền/cleanup và gi
 
 Upsert, hiện diện, nhận diện cơ bản và quyết định cảnh báo nằm trong transaction nghiệp vụ. Callback chạy sau commit và được cô lập lỗi; UI coalesce cập nhật. Các signal kết nối/chẩn đoán/phép đo trễ được so với trạng thái mới nhất. Signal cảnh báo có provenance mạng.
 
+Chẩn đoán dựa trên các cửa sổ ICMP có timestamp. Kết luận có đủ bằng chứng cần ba chu kỳ liên tiếp để phát; khi `diagnose()` trả `unknown` sau một kết luận có nguyên nhân/ổn định, `PingMonitor` phát `unknown` ngay để gỡ kết luận cũ. Phục hồi vẫn cần ba chu kỳ xác nhận. Nhánh lỗi đo không thêm timeout vào cửa sổ và lưu `measurement_error` riêng. Backend lưu kết luận mới và cập nhật UI qua cùng signal; xem `docs/diagnosis-validation.md`.
+
 Stop giữ handle đến khi join xong; timeout ném lỗi và giữ tài nguyên. Backend chỉ đóng SQLite sau khi worker đã dừng. Khóa process ngăn hai tiến trình giám sát cùng bộ dữ liệu. Native driver treo vĩnh viễn vẫn là giới hạn của tiến trình Python.
 
 Cập nhật 16/11/2026: GUI không còn biểu tượng hoặc chế độ ẩn xuống khay hệ thống. Đóng cửa sổ cuối sẽ thoát vòng lặp Qt; `aboutToQuit` gọi `Backend.stop()` để dừng giám sát và các tác vụ đang chạy trước khi đóng SQLite. Cảnh báo chỉ lưu trong SQLite và hiển thị trong tab Cảnh báo cùng thanh trạng thái; không tích hợp dịch vụ gửi tin bên ngoài. Các worker vẫn xử lý I/O khi ứng dụng đang mở để giao diện không bị đứng; thu nhỏ cửa sổ xuống thanh tác vụ là thao tác cửa sổ thông thường.

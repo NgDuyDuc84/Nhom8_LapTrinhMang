@@ -29,7 +29,7 @@ DIAG_MIN_SAMPLES = 10         # dưới ngưỡng này thì kết luận là "un
 LOSS_BAD_PCT = SETTINGS["loss_bad_pct"]
 RTT_BAD_FACTOR = 3            # RTT xấu khi vượt RTT_BAD_FACTOR lần đường cơ sở...
 RTT_BAD_MIN_MS = 20           # ...và cũng phải vượt mức tối thiểu này (ms)
-DIAG_STABLE_WINDOWS = 3       # kết luận phải giữ ổn định bao nhiêu cửa sổ liên tiếp mới phát
+DIAG_STABLE_WINDOWS = 3       # chu kỳ xác nhận kết luận; thiếu dữ liệu sẽ gỡ ngay kết luận cũ
 
 # --- Traceroute ---
 TRACE_MAX_HOPS = 15

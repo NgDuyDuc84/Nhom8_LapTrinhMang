@@ -328,6 +328,10 @@ class PingMonitor:
             )
 
     def _update_stable_diagnosis(self, diagnosis: Diagnosis, *, immediate: bool = False) -> None:
+        # Thiếu bằng chứng phải gỡ ngay kết luận cũ; chỉ kết luận có đủ dữ liệu
+        # mới chờ các chu kỳ xác nhận để chống nhảy trạng thái.
+        if diagnosis.verdict == "unknown" and self._last_emitted_verdict not in (None, "unknown"):
+            immediate = True
         if diagnosis.verdict == self._pending_verdict:
             self._pending_windows += 1
         else:
