@@ -572,14 +572,18 @@ class Backend(BackendBase):
             self._last_traceroute = (now(), list(hops))
         self.traceroute_done.emit(hops)
 
-    @storage_method
-    def accept_gateway(self, mac):
-        device = repository.get_device(mac)
-        if device is None or device.ip != self._connection.get("gateway"):
-            raise ValueError("Chọn đúng thiết bị ở địa chỉ gateway của mạng hiện tại.")
-        repository.set_meta("gateway_mac", repository.valid_mac(mac))
-        if self._arp_detector:
-            self._arp_detector._gateway_owner = mac.lower()
+    def accept_gateway(self, mac, *, context=None):
+        with self._state_lock:
+            if not self._connection.get("connected") or (context is not None and context != self.get_connection_status()):
+                raise ValueError("Kết nối đã đổi hoặc đã mất. Hãy chọn lại router của mạng hiện tại.")
+            with network_scope(self._storage_network):
+                device = repository.get_device(mac)
+                if device is None or device.ip != self._connection.get("gateway"):
+                    raise ValueError("Chọn đúng thiết bị ở địa chỉ gateway của mạng hiện tại.")
+                if self._arp_detector:
+                    self._arp_detector.confirm_gateway(mac)
+                else:
+                    repository.set_meta("gateway_mac", repository.valid_mac(mac))
 
     # ------------------------------------------------------------------ thiết bị
     @storage_method

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 import ipaddress
+import threading
 from datetime import timedelta
 from typing import Iterable, TYPE_CHECKING
 
@@ -77,6 +78,7 @@ class ArpAnomalyDetector:
     MAX_ENTRIES = 1024
 
     def __init__(self, gateway_ip: str, known_devices: Iterable[Device] = (), *, subnet: str = "") -> None:
+        self._lock = threading.RLock()
         self._gateway_ip = gateway_ip
         self._known_owner: dict[str, str] = {}
         self._gateway_owner: str | None = None
@@ -93,15 +95,42 @@ class ArpAnomalyDetector:
         if pinned:
             self._gateway_owner = pinned
 
+    def confirm_gateway(self, mac: str) -> None:
+        """Lưu mốc router mới và bỏ bằng chứng gateway trước lần xác nhận này."""
+        mac = repository.valid_mac(mac)
+        with self._lock:
+            # Nếu lưu lỗi, giữ nguyên toàn bộ mốc/bằng chứng đang dùng.
+            repository.set_meta("gateway_mac", mac)
+            self._gateway_owner = mac
+            self._gateway_candidates.clear()
+            self._recent_claims.pop(self._gateway_ip, None)
+            self._known_owner[self._gateway_ip] = mac
+            self._known_seen[self._gateway_ip] = time.monotonic()
+            for key in list(self._change_candidates):
+                if key[0] == self._gateway_ip:
+                    del self._change_candidates[key]
+            for owner, claims in list(self._mac_ips.items()):
+                claims.pop(self._gateway_ip, None)
+                if not claims:
+                    del self._mac_ips[owner]
+
     def observe(self, observation: "ArpObservation") -> list[Alert]:
         """Nhận một ARP Reply/announcement và trả các cảnh báo mới được lưu."""
+        with self._lock:
+            return self._observe(observation)
+
+    def _observe(self, observation: "ArpObservation") -> list[Alert]:
+        if observation.operation not in (1, 2) or (observation.operation == 1 and not observation.gratuitous):
+            return []
         moment = time.monotonic()
         ip = observation.ip
         mac = observation.mac.lower()
         try:
             repository.valid_mac(mac)
             address = ipaddress.IPv4Address(ip)
-            if address.is_unspecified or address.is_multicast or (self._subnet and address not in self._subnet):
+            if (address.is_unspecified or address.is_multicast or address.is_loopback
+                    or (self._subnet and (address not in self._subnet or
+                        (self._subnet.prefixlen < 31 and address in (self._subnet.network_address, self._subnet.broadcast_address))))):
                 return []
         except ValueError:
             return []
@@ -155,8 +184,8 @@ class ArpAnomalyDetector:
             level = "danger" if is_gateway else "warning"
             alert = raise_anomaly(
                 level,
-                f"Phát hiện tranh chấp IP {ip}: có phản hồi từ MAC {owners} và {mac} trong "
-                f"{self.CONFLICT_WINDOW_SEC:.0f} giây.",
+                f"Quan sát nhiều MAC cho IP {ip}: {owners} và {mac} trong "
+                f"{self.CONFLICT_WINDOW_SEC:.0f} giây. Cần kiểm tra cấp phát DHCP hoặc tranh chấp IP; chưa xác minh nguyên nhân.",
                 mac,
                 kind=f"ip_conflict:{ip}",
             )

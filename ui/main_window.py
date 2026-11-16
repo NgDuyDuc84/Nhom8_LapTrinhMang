@@ -944,10 +944,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Thiết lập", str(exc))
 
     def accept_gateway(self):
+        if not self._can_edit_displayed():
+            return
+        context = self.backend.get_connection_status()
         device = self._row_to_device(self.device_table.currentRow())
         if device and QMessageBox.question(self, "Xác nhận router", f"Bạn đã kiểm tra router thực tế và xác nhận MAC {device.mac}? Thay đổi này cập nhật mốc so sánh gateway của mạng hiện tại.") == QMessageBox.Yes:
             try:
-                self.backend.accept_gateway(device.mac)
+                self.backend.accept_gateway(device.mac, context=context)
+                self.statusBar().showMessage("Đã cập nhật mốc MAC router cho mạng hiện tại.", 10000)
             except Exception as exc:
                 QMessageBox.critical(self, "Router", str(exc))
 
