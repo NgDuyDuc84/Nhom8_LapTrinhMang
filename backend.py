@@ -116,6 +116,9 @@ class BackendBase(QObject):
         """Trả về các cảnh báo gần nhất, mới nhất trước, tối đa ``limit`` bản ghi."""
         raise NotImplementedError
 
+    def get_alert_context(self) -> dict:
+        raise NotImplementedError
+
     def get_ping_history(self, target: str, minutes: int) -> list[PingResult]:
         """Trả về các mẫu ping của một mốc (``router``/``isp``/``external``) trong ``minutes`` phút."""
         raise NotImplementedError
@@ -140,9 +143,11 @@ class Backend(BackendBase):
     Ghép các dịch vụ mạng với SQLite và chuyển callback nền thành Qt signals.
     """
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, *, history=False) -> None:
         super().__init__(parent)
         self._storage_network = "legacy"
+        self._history_mode = history
+        self._history_label = "Dữ liệu cũ chưa xác định mạng"
         self._scoped = False
         self._generation = 0
         self._session_id = ""
@@ -193,6 +198,7 @@ class Backend(BackendBase):
         from core.instance_lock import InstanceLock
         self._instance_lock = InstanceLock(database.DB_PATH)
         self._instance_lock.acquire()
+        self._history_mode = False
         self._scoped = True
         database.initialize()
         try:
@@ -619,13 +625,30 @@ class Backend(BackendBase):
         baseline.finish_baseline()
 
     # ------------------------------------------------------------------ cảnh báo, lịch sử
-    @storage_method
-    def get_alerts(self, limit: int = 100, *, offset=0, query="") -> list[Alert]:
-        return repository.list_alerts(limit, offset=offset, query=query)
+    def get_alert_context(self) -> dict:
+        with self._state_lock:
+            available = self._history_mode or bool(self._connection.get("connected"))
+            return {"mode": "history" if self._history_mode else "live",
+                    "network_id": self._storage_network if available else None,
+                    "generation": self._generation,
+                    "label": self._history_label if self._history_mode else self._connection.get("name", "")}
 
-    @storage_method
-    def acknowledge_alert(self, identifier):
-        repository.acknowledge_alert(identifier)
+    def get_alerts(self, limit: int = 100, *, offset=0, query="") -> list[Alert]:
+        with self._state_lock:
+            context = self.get_alert_context()
+            if context["network_id"] is None:
+                return []
+            with network_scope(context["network_id"]):
+                return [replace(alert, network_id=context["network_id"])
+                        for alert in repository.list_alerts(limit, offset=offset, query=query)]
+
+    def acknowledge_alert(self, identifier, *, context=None):
+        with self._state_lock:
+            current = self.get_alert_context()
+            if current["network_id"] is None or (context is not None and context != current):
+                raise ValueError("Hồ sơ mạng đã đổi. Hãy chọn lại cảnh báo sau khi danh sách cập nhật.")
+            with network_scope(current["network_id"]):
+                repository.acknowledge_alert(identifier)
 
     @storage_method
     def get_device_history(self, mac: str, hours: int) -> list[tuple[datetime, bool | None]]:
@@ -694,9 +717,13 @@ class Backend(BackendBase):
     def select_history(self, label):
         selected = self._profile_choices[label]
         self.stop()
-        self._storage_network = selected
-        self._scoped = True
-        self.connection_changed.emit({"connected": False})
+        with self._state_lock:
+            self._storage_network = selected
+            self._scoped = True
+            self._history_mode = True
+            self._history_label = label
+            self._generation += 1
+        self.connection_changed.emit({"connected": False, **self.get_connection_status()})
         self.devices_refreshed.emit()
 
     def run_wifi_scan(self):

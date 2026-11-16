@@ -25,6 +25,8 @@ Network List Manager cung cấp profile GUID theo adapter GUID. Network ID kết
 
 Mỗi network có file SQLite riêng dưới `data/networks`; DB gốc là legacy chưa có định danh mạng. Session lưu metadata card và thời gian có quan sát. Ping có địa chỉ đích, session, status và timestamp; observations tách IP-MAC khỏi hồ sơ một thiết bị. Trust/baseline/identity đều thuộc cùng scope lưu trữ.
 
+Danh sách cảnh báo có ngữ cảnh riêng gồm chế độ live/history, hồ sơ và generation. Ở live, chưa có kết nối thì không đọc cảnh báo legacy hoặc hồ sơ vừa ngắt. Mỗi sự kiện đổi kết nối tải lại cảnh báo ngay cả khi mạng mới chưa có sự kiện, xóa dữ liệu/trạng thái tìm kiếm/phân trang của ngữ cảnh trước và bỏ signal cảnh báo sai mạng. History chỉ bật khi người dùng mở launcher lịch sử hoặc chọn hồ sơ; quay lại giám sát sẽ trả về live. Truy vấn/đánh dấu cảnh báo giữ khóa trạng thái cùng scope SQLite; mỗi dòng UI mang ngữ cảnh đã tải để từ chối thao tác trễ trên ID trùng ở hồ sơ khác. Lỗi đọc hồ sơ mới không giữ lại dòng cảnh báo của mạng trước.
+
 ## Scan, callbacks và dừng
 
 Scan xác nhận capture sẵn sàng, kiểm tra các lỗi nền/cleanup và giữ đầy đủ IP-MAC claim. Đọc lại kết nối/generation trước transaction; khóa commit chung với backend ngăn đổi phiên giữa bước kiểm tra và cập nhật. Scan lỗi/hủy không tăng misses; quét một dải nhỏ không đếm vắng địa chỉ ngoài dải.

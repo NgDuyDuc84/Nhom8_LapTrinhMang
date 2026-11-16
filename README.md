@@ -38,7 +38,7 @@ Trong **Công cụ**:
 4. Sao lưu/khôi phục hồ sơ mạng bằng API backup của SQLite. Khôi phục dừng worker và tạo bản sao trước khi ghi dữ liệu.
 5. Chọn **Xem hồ sơ mạng / lịch sử cũ** để xem mạng khác hoặc dữ liệu trước khi ứng dụng có định danh mạng. Quay lại theo dõi bằng lựa chọn kết nối hiện tại; chế độ bắt gói vẫn cần quyền thích hợp.
 
-Tab Cảnh báo có tìm kiếm, trang trước/sau và đánh dấu đã xử lý. Tab Chẩn đoán có biểu đồ RTT/loss; mốc giữa được gọi là **hop sau gateway**, chưa xác minh thuộc ISP. Một hop trung gian phản hồi kém trong khi đích cuối tốt không đủ để kết luận ISP lỗi.
+Tab Cảnh báo chỉ đọc hồ sơ của mạng đang kết nối, có tìm kiếm, trang trước/sau và đánh dấu đã xử lý. Đổi/mất mạng sẽ xóa danh sách đang hiển thị và đặt lại bộ lọc/trang; lúc chưa xác định mạng không tự hiện dữ liệu cũ. Muốn xem cảnh báo mạng khác, chọn **Công cụ → Xem hồ sơ mạng / lịch sử cũ**; màn hình sẽ ghi rõ đang xem lịch sử. Tab Chẩn đoán có biểu đồ RTT/loss; mốc giữa được gọi là **hop sau gateway**, chưa xác minh thuộc ISP. Một hop trung gian phản hồi kém trong khi đích cuối tốt không đủ để kết luận ISP lỗi.
 
 ## Dữ liệu, nâng cấp và hồ sơ mạng
 
@@ -79,7 +79,7 @@ ARP không bao phủ IPv6, VLAN/thiết bị sau router hoặc client isolation.
 
 ## Cảnh báo trong ứng dụng
 
-Cảnh báo được lưu trong SQLite theo hồ sơ mạng và hiển thị tại tab **Cảnh báo** cùng thanh trạng thái. Không cần tài khoản, token hoặc cấu hình dịch vụ bên ngoài. Ứng dụng không gửi cảnh báo qua nền tảng khác; đóng cửa sổ sẽ dừng giám sát.
+Cảnh báo được lưu trong SQLite theo hồ sơ mạng và hiển thị tại tab **Cảnh báo** cùng thanh trạng thái. Chế độ giám sát chỉ hiển thị cảnh báo thuộc mạng đang kết nối; lịch sử cũ được mở riêng bằng lựa chọn hồ sơ hoặc `Mo_LichSu.cmd`. Dữ liệu vẫn được giữ khi đổi mạng. Thao tác đánh dấu đã xử lý từ một danh sách cũ bị từ chối nếu hồ sơ đã thay đổi, tránh cập nhật nhầm cảnh báo trùng ID ở mạng mới. Không cần tài khoản, token hoặc cấu hình dịch vụ bên ngoài. Ứng dụng không gửi cảnh báo qua nền tảng khác; đóng cửa sổ sẽ dừng giám sát.
 
 ## CLI
 

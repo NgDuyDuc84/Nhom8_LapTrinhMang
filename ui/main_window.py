@@ -139,6 +139,7 @@ class MainWindow(QMainWindow):
         self._device_rows: dict[str, int] = {}
         self._refreshing = False
         self._device_cache = {}
+        self._display_alert_context = None
         self._device_offset = 0
         self._device_page_size = 250
         self._device_timer = QTimer(self)
@@ -397,6 +398,10 @@ class MainWindow(QMainWindow):
     def _init_alerts_tab(self) -> None:
         layout = QVBoxLayout(self.alerts_tab)
         layout.setContentsMargins(0, 12, 0, 0)
+        self.alert_scope_label = QLabel()
+        self.alert_scope_label.setTextFormat(Qt.PlainText)
+        self.alert_scope_label.setWordWrap(True)
+        layout.addWidget(self.alert_scope_label)
         self.alert_banner = QLabel("Chưa có cảnh báo mới.")
         self.alert_banner.setWordWrap(True)
         self.alert_banner.setStyleSheet(badge_stylesheet("success"))
@@ -586,10 +591,38 @@ class MainWindow(QMainWindow):
             self.device_table.setUpdatesEnabled(True)
 
     def refresh_alerts(self) -> None:
-        alerts = self.backend.get_alerts(limit=100, offset=self._alert_offset, query=self.alert_search.text())
+        context = self.backend.get_alert_context()
+        if context != self._display_alert_context:
+            self.alert_list.clear()
+            self._alert_offset = 0
+            self.alert_search.clear()
+            self.statusBar().clearMessage()
+            self._display_alert_context = context
+        history = context["mode"] == "history"
+        self.alert_scope_label.setText(f"Đang xem lịch sử: {context['label']}" if history else
+                                       f"Cảnh báo mạng đang kết nối: {context['label']}" if context["network_id"] else
+                                       "Chưa xác định mạng đang theo dõi.")
+        if context["network_id"] is None:
+            self.alert_list.clear()
+            self.alert_banner.setText("Chưa có kết nối LAN hợp lệ. Để xem cảnh báo mạng cũ, chọn Công cụ → Xem hồ sơ mạng / lịch sử cũ.")
+            self.alert_banner.setStyleSheet(badge_stylesheet("pending"))
+            return
+        try:
+            alerts = self.backend.get_alerts(limit=100, offset=self._alert_offset, query=self.alert_search.text())
+        except Exception:
+            self.alert_banner.setText("Không tải được cảnh báo của hồ sơ đang chọn. Hãy thử lại.")
+            self.alert_banner.setStyleSheet(badge_stylesheet("warning"))
+            return
+        if context != self.backend.get_alert_context():
+            self.alert_list.clear()
+            self.alert_banner.setText("Hồ sơ mạng đang thay đổi; đang chờ cập nhật danh sách cảnh báo.")
+            self.alert_banner.setStyleSheet(badge_stylesheet("pending"))
+            return
         self.alert_list.clear()
         if not alerts:
-            self.alert_banner.setText("Chưa có cảnh báo được ghi nhận; trạng thái mạng xem ở tab Chẩn đoán.")
+            self.alert_banner.setText("Không có cảnh báo khớp tìm kiếm trong hồ sơ này." if self.alert_search.text() else
+                                     "Hồ sơ lịch sử này chưa có cảnh báo." if history else
+                                     "Mạng đang kết nối chưa có cảnh báo; trạng thái mạng xem ở tab Chẩn đoán.")
             self.alert_banner.setStyleSheet(badge_stylesheet("success"))
             return
 
@@ -601,6 +634,7 @@ class MainWindow(QMainWindow):
         for alert in alerts:
             item = QListWidgetItem(f"{alert.level.upper()}  ·  {alert.ts:%d/%m %H:%M:%S}\n{alert.message}")
             item.setData(Qt.UserRole, alert.id)
+            item.setData(Qt.UserRole + 1, context)
             if alert.acknowledged:
                 item.setText("[Đã xử lý] " + item.text())
             tone = "danger" if alert.level == "danger" else "warning" if alert.level == "warning" else "success"
@@ -617,9 +651,10 @@ class MainWindow(QMainWindow):
         item = self.alert_list.currentItem()
         if item and item.data(Qt.UserRole):
             try:
-                self.backend.acknowledge_alert(item.data(Qt.UserRole))
+                self.backend.acknowledge_alert(item.data(Qt.UserRole), context=item.data(Qt.UserRole + 1))
                 self.refresh_alerts()
             except Exception as exc:
+                self.refresh_alerts()
                 QMessageBox.warning(self, "Cảnh báo", str(exc))
 
     def refresh_diagnosis(self) -> None:
@@ -704,8 +739,11 @@ class MainWindow(QMainWindow):
                 f"IPv4: <b style='color:#1E293B'>{escape(status['ip'])}/{escape(status['netmask'])}</b>"
                 f" &nbsp; · &nbsp; Gateway: <b style='color:#1E293B'>{escape(status['gateway'] or 'chưa có')}</b>"
             )
+        elif self.backend.get_alert_context()["mode"] == "history":
+            self.connection_label.setText("Đang xem hồ sơ lịch sử đã chọn; giám sát đang dừng.")
         else:
             self.connection_label.setText("Chưa có kết nối LAN hợp lệ; đang chờ kết nối.")
+        self.refresh_alerts()
         if hasattr(self, "diagnosis_plot"):
             self.refresh_diagnosis()
             self.refresh_devices()
@@ -723,10 +761,14 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def on_alert_raised(self, alert: Alert) -> None:
-        if alert.network_id and alert.network_id != getattr(self.backend, "_storage_network", alert.network_id):
+        context = self.backend.get_alert_context()
+        if context["network_id"] is None or context["mode"] != "live":
+            return
+        if alert.network_id and alert.network_id != context["network_id"]:
             return
         self.refresh_alerts()
-        self.statusBar().showMessage(f"Cảnh báo NetGuard: {alert.message}", 10000)
+        if context == self.backend.get_alert_context():
+            self.statusBar().showMessage(f"Cảnh báo NetGuard: {alert.message}", 10000)
 
     @Slot(object)
     def on_diagnosis_changed(self, diagnosis: Diagnosis) -> None:

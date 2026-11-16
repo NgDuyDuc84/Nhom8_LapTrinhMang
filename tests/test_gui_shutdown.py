@@ -43,8 +43,8 @@ main.get_warnings = lambda: []
 
 instances = []
 class ObservedBackend(Backend):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.stop_calls = 0
         instances.append(self)
     def stop(self):
@@ -72,6 +72,7 @@ assert result == 0, result
 assert closed == [True], closed
 assert app.quitOnLastWindowClosed()
 assert instances[0].stop_calls == 1
+assert instances[0].get_alert_context()['mode'] == ('history' if history else 'live')
 assert not database._connections
 assert not [t.name for t in threading.enumerate() if t.name.startswith('netguard-')]
 if history:

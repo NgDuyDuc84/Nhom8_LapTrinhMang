@@ -318,7 +318,7 @@ def run_gui(*, history=False) -> int:
 
         from backend import Backend
 
-        backend = Backend()
+        backend = Backend(history=history)
         window = MainWindow(backend, warnings=warnings)
         if not history:
             backend.start()

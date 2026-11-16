@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView
 
 from backend import Backend
+from core.interfaces import NetInterface
 from db import repository
 from models import Alert, Device, PingResult, now
 from ui.device_columns import DeviceColumn as Col
@@ -22,6 +23,8 @@ def window(monkeypatch):
     from ui.main_window import MainWindow
     app = QApplication.instance() or QApplication([])
     backend = Backend()
+    backend._emit_connection(NetInterface("Wi-Fi", "test", "192.168.1.9", "255.255.255.0", "192.168.1.1",
+                                          "00:11:22:33:44:55", False, True, 7))
     ui = MainWindow(backend)
     yield backend, ui, app
     backend.stop()

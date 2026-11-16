@@ -1,8 +1,10 @@
 # Báo cáo kiểm thử hiện tại - 16/11/2026
 
-Kết quả chốt sau sửa nhận diện khi kết nối thay đổi: **253 test pass**, coverage dòng **77%**, Ruff và `git diff --check` đạt. Có thêm 10 trường hợp cho nhận diện đang chạy khi mất mạng/đổi hồ sơ/đổi IP/đổi card và kết nối lại. Mốc trước đó sau dọn chức năng gửi tin bên ngoài là 243 test; các test riêng của chức năng đã gỡ không còn trong bộ kiểm thử. Môi trường kiểm tra là Windows/Python 3.14.7; chưa xác nhận kết quả CI trên GitHub cho thay đổi này.
+Kết quả chốt sau sửa phạm vi cảnh báo trên UI: **263 test pass**, coverage dòng **78%**, Ruff và `git diff --check` đạt. Có thêm 10 trường hợp cho tab Cảnh báo; mốc trước đó sau sửa nhận diện khi đổi kết nối là 253 test. Môi trường kiểm tra là Windows/Python 3.14.7; chưa xác nhận kết quả CI trên GitHub cho thay đổi này.
 
-Chi tiết từng lỗi/bằng chứng/giới hạn của đợt trước: [báo cáo sửa mã](remediation-report-2026-11-12.md). Các con số 20/65/145/162/243/249/265/283 trong tài liệu lịch sử là mốc cũ, không phải kết quả hiện tại. Cảnh báo được lưu SQLite và hiển thị trong tab Cảnh báo/thanh trạng thái; đóng cửa sổ sẽ thoát và dừng worker.
+Chi tiết từng lỗi/bằng chứng/giới hạn của đợt trước: [báo cáo sửa mã](remediation-report-2026-11-12.md). Các con số 20/65/145/162/243/249/253/265/283 trong tài liệu lịch sử là mốc cũ, không phải kết quả hiện tại. Cảnh báo được lưu SQLite và hiển thị trong tab Cảnh báo/thanh trạng thái; đóng cửa sổ sẽ thoát và dừng worker.
+
+`tests/test_alert_network_scope.py` tái hiện lỗi UI đọc cảnh báo legacy lúc chưa xác định mạng bằng một test thất bại trước sửa. Bộ mới kiểm tra khởi động live không đọc legacy; đổi sang mạng không có cảnh báo; hai mạng cùng IP được tách và đặt lại tìm kiếm/trang; ngắt kết nối bỏ signal đến muộn; lựa chọn cũ không đánh dấu nhầm ID trùng ở mạng mới; lịch sử legacy được mở rõ ràng; xem lịch sử rồi quay lại live có/không có LAN; lỗi tải mạng mới không giữ dòng mạng cũ; sự kiện từ mạng cũ không thay danh sách/thanh trạng thái. Các test dùng SQLite tạm và Qt thật, không phát gói mạng. Kiểm tra đóng GUI trong tiến trình riêng vẫn xác nhận đúng chế độ live/history.
 
 Bộ hiện tại kiểm tra capture startup/runtime/cleanup, worker refresh/stop, network context/session, transaction/chống lặp, thiết bị/nhận diện, parser mDNS/NBNS, ICMP socket, chẩn đoán, CSV, PDF, UI và launcher. Các phép thử dùng DB tạm và I/O mạng giả. Có kiểm tra metadata NLM/card thật theo chế độ chỉ đọc và render PDF/Qt offscreen.
 
