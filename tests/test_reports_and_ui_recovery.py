@@ -21,7 +21,6 @@ from ui.device_columns import DeviceColumn as Col
 def window(monkeypatch):
     from ui.main_window import MainWindow
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setattr("ui.main_window.NetGuardTrayIcon", Mock())
     backend = Backend()
     ui = MainWindow(backend)
     yield backend, ui, app
@@ -120,12 +119,18 @@ def test_alert_paging_search_and_acknowledgement(window):
     assert "Đã xử lý" in ui.alert_list.item(0).text()
 
 
-def test_tray_has_packaged_icon_when_theme_is_empty(window, monkeypatch):
-    from PySide6.QtGui import QIcon
-    from ui.tray import NetGuardTrayIcon
-    monkeypatch.setattr(QIcon, "fromTheme", lambda name: QIcon())
-    tray = NetGuardTrayIcon()
-    assert not tray.icon().isNull()
+def test_window_has_packaged_icon_without_a_tray(window):
+    _, ui, _ = window
+    assert not ui.windowIcon().isNull()
+
+
+def test_alert_is_visible_in_window_without_a_tray(window):
+    backend, ui, _ = window
+    alert = Alert("warning", "Thiết bị chưa tin cậy vừa xuất hiện", kind="stranger")
+    repository.add_alert(alert)
+    backend._emit_alert(alert)
+    assert alert.message in ui.statusBar().currentMessage()
+    assert ui.alert_list.count() == 1
 
 
 def test_report_uses_stored_context_and_sql_upper_bound(monkeypatch, tmp_path):

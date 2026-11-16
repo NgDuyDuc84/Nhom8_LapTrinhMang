@@ -297,6 +297,8 @@ def run_gui(*, history=False) -> int:
     from ui.theme import apply_light_theme
 
     app = QApplication.instance() or QApplication(sys.argv)
+    # Đóng cửa sổ cuối là thoát; aboutToQuit dừng dịch vụ và đóng SQLite.
+    app.setQuitOnLastWindowClosed(True)
     apply_light_theme(app)
     problems = [] if history else check_environment(require_network=False)
     if problems:

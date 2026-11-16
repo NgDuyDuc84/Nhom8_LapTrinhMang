@@ -350,11 +350,11 @@ Parser chỉ nhận một số nhãn tiếng Anh/Việt và bảng mã được 
 
 ### 38. [P3 — phạm vi chức năng] Một số chức năng chưa được hoàn thiện hoặc chưa có luồng dùng trực tiếp
 
-**Vị trí:** [extras/telegram_notify.py:6](D:/Nhom8_LapTrinhMang/extras/telegram_notify.py:6), [extras/zalo_notify.py:39](D:/Nhom8_LapTrinhMang/extras/zalo_notify.py:39), [ui/main_window.py:217](D:/Nhom8_LapTrinhMang/ui/main_window.py:217), [README.md:270](D:/Nhom8_LapTrinhMang/README.md:270).
+**Vị trí:** [ui/main_window.py:217](D:/Nhom8_LapTrinhMang/ui/main_window.py:217), [README.md:270](D:/Nhom8_LapTrinhMang/README.md:270).
 
-Telegram còn `NotImplementedError`; Zalo chỉ format/demo và trả `not_configured` khi yêu cầu gửi thật. Hai module chưa nối vào pipeline cảnh báo; chưa có gửi, thử lại hay hàng đợi thông báo. UI chưa có các luồng riêng cho traceroute, baseline, lịch sử hiện diện, CSV, Wi-Fi và cài đặt ngưỡng/card. Cảnh báo chỉ hiển thị 20 mục gần nhất, không có xem cũ, lọc/tìm hoặc xác nhận đã xử lý. Biểu đồ RTT chưa tạo legend để giải thích ba đường màu và chưa có biểu đồ loss riêng.
+UI chưa có các luồng riêng cho traceroute, baseline, lịch sử hiện diện, CSV, Wi-Fi và cài đặt ngưỡng/card. Cảnh báo chỉ hiển thị 20 mục gần nhất, không có xem cũ, lọc/tìm hoặc xác nhận đã xử lý. Biểu đồ RTT chưa tạo legend để giải thích ba đường màu và chưa có biểu đồ loss riêng.
 
-**Hướng sửa:** thống nhất danh sách chức năng được hỗ trợ, hoàn thiện luồng dùng theo ưu tiên; giữ việc demo và gửi thật được mô tả minh bạch như README hiện tại.
+**Hướng sửa:** thống nhất danh sách chức năng được hỗ trợ, hoàn thiện luồng dùng theo ưu tiên và đồng bộ hướng dẫn với README.
 
 ### 39. [P3 — đọc mã] Cấu hình và hợp đồng giữa các tầng còn khó thay đổi, dễ lệch
 

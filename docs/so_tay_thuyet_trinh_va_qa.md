@@ -7,7 +7,7 @@ Ngày đối chiếu mã: 05/11/2026. Dành cho thành viên Nhóm 8 học để
 Trong lúc khảo sát, mã nguồn thay đổi do một thao tác merge từ bên ngoài phiên đọc này:
 
 - Trước merge, đã chạy `.\.venv\Scripts\python.exe -m pytest -q --tb=short`, kết quả **65 passed in 7.52s**.
-- Sau đó, `git status --short` báo xung đột tại README, giao diện, MAC, Wi-Fi và Zalo. `ui/main_window.py` chứa dấu xung đột và kiểm tra cú pháp báo `SyntaxError`.
+- Sau đó, `git status --short` báo xung đột tại README, giao diện, MAC và Wi-Fi. `ui/main_window.py` chứa dấu xung đột và kiểm tra cú pháp báo `SyntaxError`.
 - Các module OUI, CSV và PDF ban đầu là khung; mã triển khai mới xuất hiện trong lần merge. Vì vậy, câu “chưa có mã PDF/CSV/OUI” trong kịch bản cũ không còn mô tả đủ trạng thái mới. Cũng chưa thể dùng mã vừa nhập làm bằng chứng rằng tích hợp đã chạy thành công.
 - Sổ tay giải thích lõi đã đối chiếu, đồng thời ghi riêng những phần mới cần xác minh sau merge. Không dùng kết quả 65 test trước merge để khẳng định bản sau merge chạy đạt.
 
@@ -308,8 +308,6 @@ Trạng thái tính năng phụ khi đang nhập nhánh:
 | CSV | Đã xuất hiện hàm ghi Device/PingResult bằng UTF-8 BOM | Có mã module, cần thử sau merge; chưa có nút CSV trong UI đã đọc |
 | PDF | Đã xuất hiện mã ReportLab, matplotlib, Arial Windows, bảy nhóm nội dung | Cần kiểm tra phụ thuộc, tạo file và xem chất lượng xuất thực tế sau merge |
 | Wi-Fi | `netsh wlan show networks mode=bssid`, gợi ý kênh 1/6/11 | Ước lượng 2.4 GHz, không tự đổi router; file đang xung đột |
-| Zalo | Tạo nội dung và dry-run; khi gửi thật trả not_configured | Chưa tích hợp gửi Zalo thật; file đang xung đột |
-| Telegram | Hàm khung `NotImplementedError` đã đọc | Chưa triển khai |
 
 Wi-Fi chọn kênh theo điểm cộng của tín hiệu và độ chồng lấn; ít điểm hơn được ưu tiên. Không có dữ liệu 2.4 GHz thì trả `None` ở bản đã đọc trước merge. Điểm số không đo đầy đủ nhiễu radio, tải sử dụng kênh, độ rộng kênh hay chất lượng Internet.
 
@@ -327,7 +325,6 @@ Các nhóm được thấy:
 - `test_cli_offline.py`: monitor/diagnose bắt đầu khi offline và dừng sạch.
 - `test_wifi_channels.py`: thiếu dữ liệu, chọn kênh và đọc dữ liệu netsh được thay thế trong test.
 - `test_simulate_network.py`: các hàm mô phỏng phát hiện trùng IP/thiết bị mới/thiết bị rời đi.
-- `test_zalo_notify.py`: định dạng, dry-run và not_configured.
 
 Các hàm mô phỏng trong `tests/simulate/simulate_network.py` khác luồng đo mạng thật. Test mô phỏng trùng IP không tự chứng minh `ArpAnomalyDetector` đã được kiểm chứng đầy đủ trên mạng thật.
 
@@ -480,7 +477,7 @@ Mô phỏng chỉ in dữ liệu tạo sẵn, không gửi gói và không phả
 
 **46. 65 bài đạt nghĩa là phủ 100% à?** Không. Nó chỉ xác nhận 65 trường hợp chạy đạt ở lần chạy trước merge; chưa đo coverage và chưa đại diện mọi điều kiện mạng.
 
-**47. Đã gửi Zalo thật chưa?** Chưa. Dry-run tạo nội dung, `sent=False`; gửi thật chưa có tích hợp, trả trạng thái chưa cấu hình.
+**47. Cảnh báo được xem ở đâu?** Trong tab Cảnh báo và thanh trạng thái của ứng dụng; lịch sử được lưu SQLite theo hồ sơ mạng.
 
 **48. PDF/CSV/OUI đã xong chưa?** Trong lúc khảo sát đã xuất hiện mã triển khai từ nhánh mới. Cần hoàn tất merge và kiểm tra tương ứng trước khi khẳng định bản tích hợp chạy thành công; không dùng kịch bản cũ để kết luận mã vẫn là stub.
 
@@ -524,7 +521,7 @@ Kịch bản slide chi tiết có sẵn tại `docs/kich_ban_thuyet_trinh.md`; c
 - MAC cục bộ không đồng nghĩa thiết bị nguy hiểm; trusted không ngăn giả mạo.
 - ICMP không đo Mbps, không kiểm tra toàn bộ DNS/web và không xác định thủ phạm chắc chắn.
 - 65 test đạt là mốc trước merge; test lại sau khi hoàn tất tích hợp.
-- Zalo thật chưa triển khai; OUI/CSV/PDF mới cần kiểm tra sau merge.
+- OUI/CSV/PDF mới cần kiểm tra sau merge.
 
 ## 20. Nguồn đối chiếu
 

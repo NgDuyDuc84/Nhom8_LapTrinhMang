@@ -99,7 +99,7 @@ export async function build(p,deviceImage,notes){
   text(s,'Kết quả tự động cần được bổ sung bằng đối chiếu ARP, ICMP và diễn tập trên mạng thật.',64,590,1152,66,26,C.ink);
 
   s=base(p,'Hạn chế và hướng phát triển',11,notes[10]);
-  table(s,[['Hiện tại','Bước phát triển tiếp theo'],['ARP phụ thuộc phản hồi và cấu hình LAN','Đánh giá thêm trên các điều kiện mạng'],['ICMP hỗ trợ khoanh vùng sự cố','Đối chiếu và tinh chỉnh ngưỡng chẩn đoán'],['PDF, CSV và tra hãng MAC mới có khung','Hoàn thiện và kiểm thử các chức năng'],['Zalo mới mô phỏng nội dung thông báo','Tích hợp dịch vụ gửi thông báo thật'],['Baseline hiện thao tác qua CLI','Bổ sung thao tác trên giao diện']],64,170,1152,424,[576,576],25);
+  table(s,[['Hiện tại','Bước phát triển tiếp theo'],['ARP phụ thuộc phản hồi và cấu hình LAN','Đánh giá thêm trên các điều kiện mạng'],['ICMP hỗ trợ khoanh vùng sự cố','Đối chiếu và tinh chỉnh ngưỡng chẩn đoán'],['PDF, CSV và tra hãng MAC mới có khung','Hoàn thiện và kiểm thử các chức năng'],['Baseline hiện thao tác qua CLI','Bổ sung thao tác trên giao diện']],64,170,1152,424,[576,576],25);
   text(s,'Phát triển tiếp dựa trên kết quả kiểm tra, phản hồi sử dụng và yêu cầu của nhóm.',64,619,1152,45,23,C.muted);
 
   s=base(p,'',12,notes[11]);

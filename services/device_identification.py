@@ -28,6 +28,7 @@ class DeviceIdentification:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._pending = None
+        self._active_cancel: threading.Event | None = None
         self._generation = 0
         self._last_fingerprint = None
         self._last_discovered = 0.0
@@ -49,13 +50,28 @@ class DeviceIdentification:
         with self._lock:
             if self._stop.is_set():
                 return
+            if self._active_cancel is not None:
+                self._active_cancel.set()
             self._generation += 1
             self._pending = (self._generation, iface, tuple(entries), force, fingerprint, current_network())
             self._wake.set()
 
+    def invalidate(self) -> None:
+        """Hủy công việc/cached metadata của kết nối cũ, không chờ lượt ARP kế tiếp."""
+        with self._lock:
+            self._generation += 1
+            if self._active_cancel is not None:
+                self._active_cancel.set()
+            self._pending = None
+            self._wake.clear()
+            self._last_fingerprint = None
+            self._last_discovered = 0.0
+            self.last_error = None
+
     def stop(self) -> None:
         """Đợi I/O có timeout kết thúc trước khi backend đóng CSDL."""
         self._stop.set()
+        self.invalidate()
         self._wake.set()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
@@ -69,19 +85,21 @@ class DeviceIdentification:
                 job = self._pending
                 self._pending = None
                 self._wake.clear()
-            if self._stop.is_set():
-                break
-            if job is None:
-                continue
-            generation, iface, entries, force, fingerprint, storage = job
-            if not force and fingerprint == self._last_fingerprint and time.monotonic() - self._last_discovered < self.CACHE_SECONDS:
-                continue
+                if self._stop.is_set():
+                    break
+                if job is None:
+                    continue
+                generation, iface, entries, force, fingerprint, storage = job
+                if not force and fingerprint == self._last_fingerprint and time.monotonic() - self._last_discovered < self.CACHE_SECONDS:
+                    continue
+                cancel = threading.Event()
+                self._active_cancel = cancel
             try:
-                hints = self._discoverer(iface, {item.ip for item in entries if not item.is_self}, self._stop)
+                hints = self._discoverer(iface, {item.ip for item in entries if not item.is_self}, cancel)
                 changed = False
                 for entry in entries:
                     with self._lock:
-                        if generation != self._generation or self._stop.is_set():
+                        if generation != self._generation or cancel.is_set() or self._stop.is_set():
                             break
                         with network_scope(storage):
                             device = repository.get_device(entry.mac)
@@ -95,11 +113,20 @@ class DeviceIdentification:
                     if stored is not None:
                         changed = True
                         self._on_device(stored)
-                self._last_fingerprint = fingerprint
-                self._last_discovered = time.monotonic()
-                self.last_error = None
-                if changed and generation == self._generation and not self._stop.is_set():
+                with self._lock:
+                    valid = generation == self._generation and not cancel.is_set() and not self._stop.is_set()
+                    if valid:
+                        self._last_fingerprint = fingerprint
+                        self._last_discovered = time.monotonic()
+                        self.last_error = None
+                if changed and valid:
                     self._on_complete()
             except Exception as exc:
                 # Nhận diện chỉ bổ sung metadata, lỗi không làm hỏng kết quả ARP.
-                self.last_error = str(exc)
+                with self._lock:
+                    if generation == self._generation and not cancel.is_set() and not self._stop.is_set():
+                        self.last_error = str(exc)
+            finally:
+                with self._lock:
+                    if self._active_cancel is cancel:
+                        self._active_cancel = None

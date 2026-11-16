@@ -17,7 +17,7 @@ Không cần kích hoạt `.venv`. Không cần Matplotlib: biểu đồ PDF dù
 
 - Nhấp đúp **Mo_NetGuard.cmd**. Windows hỏi quyền bắt gói một lần; chọn Yes để giám sát. Không phải tự mở PowerShell Administrator.
 - Nhấp đúp **Mo_LichSu.cmd** để mở dữ liệu/lịch sử và xuất báo cáo mà không bật dịch vụ mạng hoặc yêu cầu quyền bắt gói.
-- Thoát bản đang chạy qua menu khay hệ thống trước khi mở lại sau một lần cập nhật mã. Nếu khay không khả dụng, đóng cửa sổ sẽ thoát ứng dụng.
+- Đóng cửa sổ bằng nút **X** hoặc **Alt+F4** để thoát ứng dụng và dừng giám sát. NetGuard không ẩn xuống khay hệ thống để tiếp tục chạy. Sau khi cập nhật mã, đóng bản đang mở trước khi chạy lại.
 - Chỉ một tiến trình giám sát dùng cùng thư mục dữ liệu được phép chạy. Chế độ xem lịch sử có thể dùng riêng.
 
 Lỗi khởi động nằm ở `logs/startup.log`; lỗi dịch vụ và traceback nằm ở `logs/netguard.log` có giới hạn dung lượng.
@@ -25,6 +25,8 @@ Lỗi khởi động nằm ở `logs/startup.log`; lỗi dịch vụ và traceba
 ## Dùng giao diện
 
 Bấm **Làm mới mạng** để đọc lại card, quét và đo lại. Các yêu cầu được thực hiện trên worker có sẵn; các chu kỳ không chồng nhau. Capture hỏng hoặc kết nối đổi trong lúc quét sẽ làm lượt quét thất bại; không tăng bộ đếm vắng mặt hay ghi kết quả cũ sang mạng mới.
+
+Nhận diện tên/loại thiết bị cũng được hủy ngay khi phát hiện kết nối đổi hoặc mất mạng, trước khi có lượt quét tiếp theo. Khi kết nối lại, ứng dụng bỏ cache cũ để nhận diện lại; kết quả và lỗi đến muộn từ kết nối trước không được áp dụng.
 
 Bảng ưu tiên tên, loại thiết bị, hãng. **Hiện MAC / IP** hoặc **Chi tiết / Sửa tên** cho xem địa chỉ, bằng chứng và lựa chọn loại thủ công. OUI tra ngoại tuyến; MAC riêng tư/cục bộ có thể không xác định hãng. Tên, model và dịch vụ tự công bố chỉ là gợi ý.
 
@@ -75,17 +77,9 @@ Các probe ping độc lập chạy đồng thời nhưng chu kỳ vẫn tuần 
 
 ARP không bao phủ IPv6, VLAN/thiết bị sau router hoặc client isolation. Thiết bị ngủ/im lặng có thể vắng ARP. Online/Offline là kết quả quan sát. MAC có thể bị giả mạo; ICMP không kiểm tra DNS, HTTP, captive portal hay băng thông. Quyền bắt gói hiện áp dụng cho tiến trình giám sát; chế độ lịch sử không bật các dịch vụ đó.
 
-## Thông báo Telegram/Zalo tùy chọn
+## Cảnh báo trong ứng dụng
 
-Mặc định tắt. Không lưu token vào mã hoặc JSON cấu hình. Chỉ bật khi chủ hệ thống muốn gửi cảnh báo ra dịch vụ đã cấu hình:
-
-- `NETGUARD_NOTIFICATIONS_ENABLED=1`.
-- Telegram: `NETGUARD_TELEGRAM_TOKEN`, `NETGUARD_TELEGRAM_CHAT_ID`.
-- Zalo OA: `NETGUARD_ZALO_ACCESS_TOKEN`, `NETGUARD_ZALO_USER_ID`; tài khoản/quyền/tương tác người nhận phải đáp ứng điều kiện của OA API.
-
-Có hàng đợi RAM tối đa 100 thông báo và tối đa 3 lần thử khi lỗi có thể thử lại. Lỗi kênh hiển thị trên UI; cảnh báo gốc còn trong CSDL. Hàng đợi chưa gửi không được bảo đảm tồn tại sau khi tắt app. Không tự refresh token OA. Zalo `dry_run=True` vẫn chỉ mô phỏng.
-
-Các adapter dựa trên [Telegram Bot API](https://core.telegram.org/bots/api#sendmessage) và [Zalo OA message API](https://stc-developers.zdn.vn/docs/v2/official-account/tin-nhan/tin-tu-van/gui-tin-tu-van-trich-dan?lang=vi). Chưa kiểm chứng gửi thật bằng tài khoản người dùng trong đợt sửa này.
+Cảnh báo được lưu trong SQLite theo hồ sơ mạng và hiển thị tại tab **Cảnh báo** cùng thanh trạng thái. Không cần tài khoản, token hoặc cấu hình dịch vụ bên ngoài. Ứng dụng không gửi cảnh báo qua nền tảng khác; đóng cửa sổ sẽ dừng giám sát.
 
 ## CLI
 
@@ -109,7 +103,7 @@ CLI bắt gói cần quyền thích hợp. Lệnh demo CSDL cuối cùng chỉ d
 .\.venv\Scripts\python.exe -m pytest --cov -q
 ```
 
-Mọi test có CSDL riêng và tắt thông báo ra ngoài. Các bài mạng dùng I/O giả; không mặc nhiên chứng minh tương thích mọi Windows/Npcap hoặc tải dài hạn. GitHub Actions kiểm tra cài mới trên Windows/Python 3.12.
+Mọi test có CSDL riêng. Các bài mạng dùng I/O giả; không mặc nhiên chứng minh tương thích mọi Windows/Npcap hoặc tải dài hạn. GitHub Actions kiểm tra cài mới trên Windows/Python 3.12.
 
 Cache `.presentation-build`, `node_modules`, DB, WAL/SHM, backup, token và log không đưa vào commit mới. Mã công cụ slide cũ được tách ở `tools/presentations/` với manifest/lock; không cần nó để chạy NetGuard. Việc bỏ track không xóa file trên máy hoặc xóa các file đã có trong **lịch sử Git**.
 

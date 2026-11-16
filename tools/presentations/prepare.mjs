@@ -6,7 +6,7 @@ const root=taskPaths.resolve(taskPaths.dirname(taskFileURLToPath(import.meta.url
 await sharp(root+'/.freebuff/theme-preview/devices.png').extract({left:24,top:348,width:1232,height:370}).resize({width:1232}).jpeg({quality:72,mozjpeg:true}).toFile(root+'/.presentation-build/devices.jpg');
 const script=await fs.readFile(root+'/docs/kich_ban_thuyet_trinh.md','utf8');
 const sections=script.split(/^## Slide \d+\. /m).slice(1);
-const sources=['README.md','README.md','README.md; backend.py','docs/architecture.md; requirements.txt','core/arp_scanner.py; services/scan_loop.py; config.py','services/baseline.py; services/alerts.py; ui/main_window.py','core/diagnosis.py; services/ping_monitor.py; config.py','ui/main_window.py; backend.py; .freebuff/theme-preview/devices.png','README.md; main.py; services/baseline.py','tests/; lần chạy pytest ngày 05/11/2026: 65 passed in 1.54s','extras/pdf_report.py; extras/csv_export.py; extras/oui.py; extras/zalo_notify.py','docs/architecture.md; README.md'];
+const sources=['README.md','README.md','README.md; backend.py','docs/architecture.md; requirements.txt','core/arp_scanner.py; services/scan_loop.py; config.py','services/baseline.py; services/alerts.py; ui/main_window.py','core/diagnosis.py; services/ping_monitor.py; config.py','ui/main_window.py; backend.py; .freebuff/theme-preview/devices.png','README.md; main.py; services/baseline.py','tests/; lần chạy pytest ngày 05/11/2026: 65 passed in 1.54s','extras/pdf_report.py; extras/csv_export.py; extras/oui.py','docs/architecture.md; README.md'];
 const notes=sections.map((s,i)=>{
   const speech=s.match(/\*\*Lời thuyết trình:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/)?.[1]?.trim();
   const time=s.match(/\*\*Thời lượng:\*\* ([^\n]+)/)?.[1]??'';

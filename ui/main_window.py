@@ -13,9 +13,10 @@ if __name__ == "__main__":
 
 from models import now
 from html import escape
+from pathlib import Path
 
 from PySide6.QtCore import QDateTime, Qt, Slot, QTimer, QTimeZone
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -48,7 +49,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.tray import NetGuardTrayIcon
 from ui.device_columns import DeviceColumn as Col
 from ui.theme import ATTENTION_ROLE, BADGES, LightTable, apply_light_theme, badge_stylesheet
 
@@ -153,6 +153,7 @@ class MainWindow(QMainWindow):
         self._measurements = backend.get_latest_measurements()
 
         self.setWindowTitle("NetGuard - Giám sát mạng LAN")
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "netguard.svg")))
         self.resize(1280, 840)
 
         self.toolbar = self.addToolBar("NetGuard")
@@ -185,10 +186,6 @@ class MainWindow(QMainWindow):
         self.report_action.setProperty("primary", True)
         self.report_action.clicked.connect(self.export_report)
         self.toolbar.addWidget(self.report_action)
-
-        self.tray = NetGuardTrayIcon(self)
-        self.tray.show()
-        self.tray.notify("NetGuard", "Ứng dụng đang chạy nền.", "info")
 
         central = QWidget()
         main_layout = QVBoxLayout(central)
@@ -729,8 +726,7 @@ class MainWindow(QMainWindow):
         if alert.network_id and alert.network_id != getattr(self.backend, "_storage_network", alert.network_id):
             return
         self.refresh_alerts()
-        if self.tray is not None:
-            self.tray.notify("Cảnh báo NetGuard", alert.message, alert.level)
+        self.statusBar().showMessage(f"Cảnh báo NetGuard: {alert.message}", 10000)
 
     @Slot(object)
     def on_diagnosis_changed(self, diagnosis: Diagnosis) -> None:
@@ -1026,12 +1022,4 @@ class MainWindow(QMainWindow):
                 self.refresh_diagnosis()
             except Exception as exc:
                 QMessageBox.critical(self, "Hồ sơ mạng", str(exc))
-
-    def closeEvent(self, event) -> None:
-        if self.tray is not None and self.tray.isVisible() and self.tray.isSystemTrayAvailable() and not self.tray.icon().isNull():
-            self.hide()
-            event.ignore()
-            return
-        super().closeEvent(event)
-
 

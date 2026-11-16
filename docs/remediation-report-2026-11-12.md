@@ -1,12 +1,12 @@
 # Kết quả sửa mã NetGuard - 12/11/2026
 
-Đối chiếu 44 nhóm phát hiện trong báo cáo ngày 11/11/2026. Người dùng đã thay đổi yêu cầu từ dừng sau từng lỗi sang hoàn tất cả đợt và báo cáo một lần. Bản sửa giữ Windows/LAN IPv4 là phạm vi sản phẩm; các giới hạn của ARP, ICMP, RF và dịch vụ thông báo được công bố bên dưới.
+Đối chiếu 44 nhóm phát hiện trong báo cáo ngày 11/11/2026. Người dùng đã thay đổi yêu cầu từ dừng sau từng lỗi sang hoàn tất cả đợt và báo cáo một lần. Bản sửa giữ Windows/LAN IPv4 là phạm vi sản phẩm; các giới hạn của ARP, ICMP và RF được công bố bên dưới.
 
 ## Kiểm chứng đã thực hiện
 
 - Môi trường cài mới tại `tmp/fresh-env`, cài trực tiếp `requirements-dev.txt`, Python 3.14.7 trên Windows. Không dùng Matplotlib hoặc thư viện PDF ngoài runtime đã khai báo.
 - Kết quả chốt: **249 test pass**, gồm 87 trường hợp bổ sung so với mốc 162 sau lỗi 01 (bao gồm 17 trường hợp cho mạng lớn). Coverage dòng toàn bộ ứng dụng: **77%**. Ruff và `pip check` đạt. Không coi số này là độ phủ mọi trạng thái mạng.
-- Các test tự động dùng SQLite riêng, socket/capture/HTTP giả; fixture chung ngăn test ghi vào CSDL người dùng và tắt gửi thông báo ra ngoài. Có test ở ranh giới AsyncSniffer/ICMP, worker thật, transaction và Qt.
+- Các test tự động dùng SQLite riêng, socket/capture giả; fixture chung ngăn test ghi vào CSDL người dùng. Có test ở ranh giới AsyncSniffer/ICMP, worker thật, transaction và Qt.
 - Đã kiểm tra metadata card và GUID hồ sơ Windows ngoài sandbox bằng API đọc; card đang dùng có hồ sơ NLM hợp lệ. Không gửi ARP/ping/traceroute thật trong lần kiểm chứng mã này.
 - Đã tạo PDF giả lập có tiếng Việt, thiếu dữ liệu, timeout và traceroute; render đủ hai trang và kiểm tra hình, bảng, N/A, font. Đã kiểm tra bố cục bảng/biểu đồ Qt offscreen; tab Chẩn đoán có cuộn để dùng ở chiều cao cửa sổ nhỏ.
 - Demo `python -m db.database` chạy thành công trong CSDL tạm riêng.
@@ -46,18 +46,18 @@
 | 28 | Gộp cập nhật thiết bị, giữ item/row theo MAC, giảm truy vấn ping còn theo chu kỳ và cập nhật curve sẵn có. Không dựng lại cả bảng cho từng device signal. |
 | 29 | Giữ lựa chọn/scroll/item; trì hoãn cập nhật khi editor đang mở. Chỉnh sửa ở generation cũ không được lưu sang hồ sơ kết nối mới. |
 | 30 | Tải dữ liệu trước khi đổi bảng, try/finally khôi phục trạng thái; lỗi tải giữ bảng cũ. Lỗi lưu checkbox/tên/ghi chú/bulk có phản hồi và cho thử lại. |
-| 31 | Có SVG dự phòng khi icon theme rỗng; kiểm tra system tray và icon trước khi ẩn cửa sổ. Double-click mở lại, notification dùng icon theo mức. |
+| 31 | Dùng SVG đóng gói làm icon cửa sổ. Hiện tại đóng cửa sổ sẽ thoát, không ẩn xuống khay hệ thống. |
 | 32 | Retention cấu hình, bảo trì theo hồ sơ/giờ, query bounded, limit âm bị từ chối. Có sao lưu/khôi phục qua SQLite backup và giữ metadata người dùng. |
 | 33 | Demo luôn tạo CSDL tạm riêng; bỏ hẳn thao tác dọn PingLog theo timestamp chung trên dữ liệu thật. |
 | 34 | Resolve đường dẫn theo dự án, chuẩn hóa GMT+7 và microsecond, thêm launcher lịch sử không bật quyền bắt gói. **Giữ phạm vi:** giám sát Windows; quyền cao vẫn áp dụng cho tiến trình giám sát. |
 | 35 | Schema version/migration + backup trước nâng cấp; validation API cho MAC/IP/target/RTT/loss/thời gian và transaction nghiệp vụ có rollback. Hồ sơ IP-MAC nhiều chiều vẫn được biểu diễn; không áp UNIQUE IP. |
 | 36 | Đã xử lý từ mục nhận diện: bảng OUI Scapy ngoại tuyến có cache/longest prefix và override; MAC cục bộ giữ Unknown khi thiếu bằng chứng. |
 | 37 | Wi-Fi trả trạng thái/lỗi có cấu trúc, loại trùng BSSID, giữ Unknown khi Band thiếu. **Giữ giới hạn:** gợi ý kênh là ước lượng; chưa đo phổ, channel width/tải hay loại AP của chính mình. |
-| 38 | Thêm luồng UI cho baseline, lịch sử, CSV, traceroute, Wi-Fi, cài đặt, backup và phân trang/tìm/ack cảnh báo. Có legend RTT/loss. Telegram/Zalo có adapter opt-in, queue bounded/retry; token/quyền OA cần cấu hình, chưa thử gửi thật. |
+| 38 | Thêm luồng UI cho baseline, lịch sử, CSV, traceroute, Wi-Fi, cài đặt, backup và phân trang/tìm/ack cảnh báo. Có legend RTT/loss. Cảnh báo chỉ hiển thị và lưu tại ứng dụng. |
 | 39 | Cấu hình có validation/UI; kết quả ping/diagnosis/hop bất biến, snapshot được copy và có generation. Dọn comment/logic dư, cập nhật tài liệu theo bản hiện tại. Chưa áp dụng type checker toàn dự án. |
 | 40 | Chọn card/CIDR; dải IP tính lười và tự phủ từng phần 1.024 địa chỉ, không từ chối `/18` hoặc subnet lớn hơn. Tiến cursor sau commit, chỉ tăng misses cho IP đã quét; UI có tiến độ/phân trang và ngân sách hồ sơ tăng theo subnet. **Giữ phạm vi:** một card, IPv4 cùng broadcast; không mở rộng thành IPv6/VLAN hoặc phép đo băng thông. Xem bổ sung [mạng lớn](large-subnet-support.md). |
 | 41 | Bỏ theo dõi 8.607 file cache/sidecar, thêm ignore và tách source công cụ sang tools/presentations với manifest/lock/env thay đường dẫn tài khoản máy. File trên máy giữ nguyên. Lịch sử Git đã tồn tại không bị viết lại. |
-| 42 | Thêm hồi quy ở ranh giới dependency/DB/worker/UI/PDF, CSDL tạm chung, tắt outbound trong test, kiểm tra cài mới, Ruff/coverage và workflow CI. Mạng/driver thật và bài tải nhiều ngày vẫn cần nghiệm thu riêng. |
+| 42 | Thêm hồi quy ở ranh giới dependency/DB/worker/UI/PDF, CSDL tạm chung, kiểm tra cài mới, Ruff/coverage và workflow CI. Mạng/driver thật và bài tải nhiều ngày vẫn cần nghiệm thu riêng. |
 | 43 | Text CSV nguy hiểm được ép literal trước khi ghi; có test cho =, +, -, @, tab và whitespace đầu ô. |
 | 44 | Reset trạng thái phiên khi đổi kết nối/stop/start; snapshot getter không lộ trạng thái mutable. Signal Qt trễ không đưa chẩn đoán cũ về sau reset; timeout worker không giả vờ đã dừng. |
 
@@ -69,7 +69,7 @@ Khi mở lại phiên, SQLite có migration và bản sao trước nâng cấp. 
 
 ## Phần chưa được chứng minh bằng kiểm thử thực tế
 
-Chưa gửi ARP/ICMP/traceroute thật để so sánh với Wireshark/Npcap trên các máy khác; chưa thử lỗi driver vật lý, khay thật trên mọi Windows, tải bão ARP/many-day retention hay tài khoản Telegram/Zalo thật. 77% coverage dòng không chứng minh 100% hành vi. Các giới hạn chuẩn ARP/ICMP/RF và phạm vi Windows/IPv4 vẫn được giữ, thể hiện trong README và known-issues.
+Chưa gửi ARP/ICMP/traceroute thật để so sánh với Wireshark/Npcap trên các máy khác; chưa thử lỗi driver vật lý hoặc tải bão ARP/many-day retention. 77% coverage dòng không chứng minh 100% hành vi. Các giới hạn chuẩn ARP/ICMP/RF và phạm vi Windows/IPv4 vẫn được giữ, thể hiện trong README và known-issues.
 
 Lịch sử Git còn chứa những file cache/WAL đã từng commit. Bản sửa chỉ bỏ theo dõi từ commit mới, không xóa file trên máy và không viết lại lịch sử hoặc force-push.
 
@@ -83,4 +83,4 @@ Tại lúc người dùng hỏi kiểm tra, `main` và `origin/main` cùng ở `
 
 - Hành vi AsyncSniffer/icmplib đối chiếu mã thư viện đang cài theo requirements.
 - Định danh mạng dùng [Windows Network List Manager](https://learn.microsoft.com/en-us/windows/win32/api/netlistmgr/nn-netlistmgr-inetworklistmanager) và [Windows SDK netlistmgr.h](https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/netlistmgr.h). Không dùng GUID mạng mặc định NDIS làm hồ sơ NLM.
-- Adapter tùy chọn theo [Telegram sendMessage](https://core.telegram.org/bots/api#sendmessage) và [Zalo OA API](https://stc-developers.zdn.vn/docs/v2/official-account/tin-nhan/tin-tu-van/gui-tin-tu-van-trich-dan?lang=vi); Noto Sans giữ giấy phép OFL trong assets/fonts.
+- Noto Sans giữ giấy phép OFL trong assets/fonts.

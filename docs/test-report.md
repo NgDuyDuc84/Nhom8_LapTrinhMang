@@ -1,12 +1,14 @@
-# Báo cáo kiểm thử hiện tại - 12/11/2026
+# Báo cáo kiểm thử hiện tại - 16/11/2026
 
-Kết quả chốt: **249 test pass**, coverage dòng **77%**, Ruff đạt và pip check không báo dependency hỏng. Đã cài requirements-dev trong một venv mới trên Windows/Python 3.14.7; CI cấu hình Windows/Python 3.12 chưa chạy trên GitHub tại lúc tạo commit local.
+Kết quả chốt sau sửa nhận diện khi kết nối thay đổi: **253 test pass**, coverage dòng **77%**, Ruff và `git diff --check` đạt. Có thêm 10 trường hợp cho nhận diện đang chạy khi mất mạng/đổi hồ sơ/đổi IP/đổi card và kết nối lại. Mốc trước đó sau dọn chức năng gửi tin bên ngoài là 243 test; các test riêng của chức năng đã gỡ không còn trong bộ kiểm thử. Môi trường kiểm tra là Windows/Python 3.14.7; chưa xác nhận kết quả CI trên GitHub cho thay đổi này.
 
-Chi tiết từng lỗi/bằng chứng/giới hạn: [báo cáo sửa mã](remediation-report-2026-11-12.md). Các con số 20/65/145/162 trong tài liệu lịch sử là mốc cũ, không phải kết quả hiện tại.
+Chi tiết từng lỗi/bằng chứng/giới hạn của đợt trước: [báo cáo sửa mã](remediation-report-2026-11-12.md). Các con số 20/65/145/162/243/249/265/283 trong tài liệu lịch sử là mốc cũ, không phải kết quả hiện tại. Cảnh báo được lưu SQLite và hiển thị trong tab Cảnh báo/thanh trạng thái; đóng cửa sổ sẽ thoát và dừng worker.
 
-Bộ hiện tại kiểm tra capture startup/runtime/cleanup, worker refresh/stop, network context/session, transaction/chống lặp, thiết bị/nhận diện, parser mDNS/NBNS, ICMP socket, chẩn đoán, CSV, PDF, UI và launcher. Các phép thử dùng DB tạm, I/O mạng/HTTP giả và tắt outbound notifications. Có kiểm tra metadata NLM/card thật theo chế độ chỉ đọc và render PDF/Qt offscreen.
+Bộ hiện tại kiểm tra capture startup/runtime/cleanup, worker refresh/stop, network context/session, transaction/chống lặp, thiết bị/nhận diện, parser mDNS/NBNS, ICMP socket, chẩn đoán, CSV, PDF, UI và launcher. Các phép thử dùng DB tạm và I/O mạng giả. Có kiểm tra metadata NLM/card thật theo chế độ chỉ đọc và render PDF/Qt offscreen.
 
-Không có kết quả diễn tập driver/mạng thật, account Telegram/Zalo thật, đo RF hoặc bài tải nhiều ngày. Coverage không phải bằng chứng mọi đường đi/OS đều hoạt động đúng.
+Kiểm tra thật ngày 16/11/2026: đọc card/NLM ngoài sandbox, rồi quét ARP giới hạn gateway `/32` trên Wi-Fi (1 vòng, timeout 1 giây). Gateway phản hồi; OUI nhận diện gateway ZTE và card máy Intel. mDNS/NetBIOS không trả gợi ý tên trong lượt thử này. Không thay đổi kết nối và không ghi CSDL người dùng. Chi tiết nhận diện và bằng chứng hồi quy: [nhận diện thiết bị](device-identification.md).
+
+Chưa diễn tập lỗi driver, ngắt/chuyển Wi-Fi/Ethernet vật lý, thiết bị thật vào/rời LAN, đo RF hoặc bài tải nhiều ngày. Coverage không phải bằng chứng mọi đường đi/OS đều hoạt động đúng.
 
 Bổ sung 17 trường hợp cho subnet lớn: `/18`, `/16`, `/8`, `/0` tính lười và biên `/31`, `/32`; phủ đủ 16 phần của `/18`; gửi tối đa 64 packet/lô, hủy giữa lô; thử lại phần lỗi mạng/CSDL; reset khi đổi mạng; chỉ tăng misses trong phần đã kiểm tra; lưu 16.382 hồ sơ; phân trang/sửa đúng MAC; tiến độ và signal cũ; CLI quét đến phần cuối và gộp router lặp. Đây là dữ liệu/I/O giả, chưa phải nghiệm thu Wi-Fi trường. Chi tiết: [large-subnet-support.md](large-subnet-support.md).
 

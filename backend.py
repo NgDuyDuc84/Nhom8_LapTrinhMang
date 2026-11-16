@@ -151,7 +151,6 @@ class Backend(BackendBase):
         self._report_thread = None
         self._report_stop = threading.Event()
         self._utility_thread = None
-        self._notifications = None
         self._maintenance_times = {}
         self._observation_times = {}
         self._loop = None  # services.scan_loop.ScanLoop, khởi tạo trong start()
@@ -186,11 +185,10 @@ class Backend(BackendBase):
         from services.ping_monitor import PingMonitor
         from services.scan_loop import ScanLoop
         from services.device_identification import DeviceIdentification
-        from services.notifications import Notifications
 
         if self._loop is not None:
             return
-        if any(service is not None for service in (self._ping_monitor, self._arp_listener, self._identifier, self._notifications)):
+        if any(service is not None for service in (self._ping_monitor, self._arp_listener, self._identifier)):
             raise RuntimeError("Dịch vụ cũ chưa dừng hoàn toàn; hãy thử dừng lại trước khi khởi động.")
         from core.instance_lock import InstanceLock
         self._instance_lock = InstanceLock(database.DB_PATH)
@@ -206,7 +204,6 @@ class Backend(BackendBase):
             raise
         self._emit_connection(iface)
         self._identifier = DeviceIdentification(on_complete=self.devices_refreshed.emit)
-        self._notifications = Notifications(self._service_status)
         self._loop = ScanLoop(
             on_device=self._emit_device,
             on_alert=self._emit_alert,
@@ -231,7 +228,6 @@ class Backend(BackendBase):
             for device in self.list_devices():
                 self.device_updated.emit(device)
             self._identifier.start()
-            self._notifications.start()
             self._loop.start()
             self._ping_monitor.start()
         except Exception:
@@ -248,7 +244,7 @@ class Backend(BackendBase):
                 "request_id": self._refresh_request_id, "running": False, "message": "", "errors": [],
             }
         errors = []
-        for attribute in ("_loop", "_arp_listener", "_ping_monitor", "_identifier", "_notifications"):
+        for attribute in ("_loop", "_arp_listener", "_ping_monitor", "_identifier"):
             service = getattr(self, attribute)
             if service is not None:
                 try:
@@ -328,6 +324,8 @@ class Backend(BackendBase):
         with self._state_lock:
             if status == self._connection:
                 return
+            if self._identifier is not None:
+                self._identifier.invalidate()
             if self._scoped:
                 with network_scope(self._storage_network):
                     if self._session_id:
@@ -516,8 +514,6 @@ class Backend(BackendBase):
     def _emit_alert(self, alert: Alert) -> None:
         """Callback từ luồng quét, chuyển thành signal Qt."""
         self.alert_raised.emit(replace(alert, network_id=current_network()))
-        if self._notifications:
-            self._notifications.enqueue(alert)
 
     def _emit_diagnosis(self, diagnosis: Diagnosis) -> None:
         """Ghi nhớ kết luận trong phiên và chuyển sang signal Qt."""

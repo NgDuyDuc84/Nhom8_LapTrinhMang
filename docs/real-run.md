@@ -30,19 +30,7 @@ của hệ thống giám sát mạng NetGuard.
 
 Kết quả: 4 PASS, 0 FAIL.
 
-### 3.3. Cảnh báo Zalo
-
-Đã kiểm thử:
-- Định dạng nội dung cảnh báo.
-- Cảnh báo mức warning.
-- Chế độ chạy thử dry-run.
-- Trường hợp chưa cấu hình API.
-
-Kết quả: 4 PASS, 0 FAIL.
-
-Lưu ý: Chưa thực hiện gửi tin nhắn Zalo thật.
-
-### 3.4. Quét Wi-Fi
+### 3.3. Quét Wi-Fi
 
 Đã chạy lệnh:
 
@@ -53,7 +41,7 @@ Kết quả:
 - Hiển thị SSID, BSSID, kênh và tín hiệu.
 - Kênh 2.4 GHz được chương trình đề xuất: 1.
 
-### 3.5. Xuất báo cáo PDF
+### 3.4. Xuất báo cáo PDF
 
 Đã chạy thử chức năng tạo báo cáo PDF.
 
@@ -69,16 +57,16 @@ của biểu đồ và phông chữ.
 
 Lệnh thực hiện:
 
-python -m pytest tests/test_diagnosis.py tests/test_simulate_network.py tests/test_zalo_notify.py -v
+python -m pytest tests/test_diagnosis.py tests/test_simulate_network.py -v
 
 Kết quả:
 
-20 passed in 0.74s
+Báo cáo gốc ghi nhận 20 test đạt trong 0.74s, bao gồm một phần chức năng hiện đã được gỡ. Con số này là mốc lịch sử; kết quả bộ kiểm thử hiện tại xem docs/test-report.md.
 
 ## 5. Minh chứng
 
 Cần bổ sung ảnh chụp:
-- Terminal hiển thị 20 bài kiểm thử PASS.
+- Terminal hiển thị bộ kiểm thử hiện tại PASS.
 - Terminal quét Wi-Fi và đề xuất kênh.
 - Báo cáo PDF đã tạo.
 - Giao diện chính NetGuard khi chạy thành công.
@@ -86,7 +74,6 @@ Cần bổ sung ảnh chụp:
 ## 6. Hạn chế
 
 - Chưa xác nhận kiểm thử tích hợp toàn bộ NetGuard.
-- Chưa kiểm thử gửi cảnh báo Zalo thực tế.
 - Mô phỏng xung đột IP sử dụng dữ liệu giả lập.
 - Chưa có kết quả kiểm thử trên nhiều môi trường mạng.
 

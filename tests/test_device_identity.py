@@ -277,7 +277,6 @@ def test_alert_uses_readable_device_name_instead_of_requiring_ip():
 
 def test_backend_enriches_devices_through_its_real_scan_pipeline(monkeypatch, isolated_db, iface):
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setattr("ui.main_window.NetGuardTrayIcon", Mock())
     entry = ScanEntry("192.168.1.20", "02:11:22:33:44:55")
     resolve = lambda preferred=None: iface
     monkeypatch.setattr("core.interfaces.get_active_interface", resolve)
@@ -314,7 +313,6 @@ def test_backend_enriches_devices_through_its_real_scan_pipeline(monkeypatch, is
 
 def test_device_table_uses_names_and_manual_confirmation_survives_refresh(monkeypatch, isolated_db):
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setattr("ui.main_window.NetGuardTrayIcon", Mock())
     device = identify_device(Device("192.168.1.20", "02:11:22:33:44:55"), hints=DeviceHints(name="iPhone của Mẹ", model="iPhone"))
     repository.upsert_device(device)
     repository.save_identity(device)

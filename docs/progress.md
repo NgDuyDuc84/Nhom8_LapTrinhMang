@@ -70,7 +70,7 @@ Giai đoạn 0: **đã xong** (A đã trả lời: giữ Python 3.14.7, agent t�
 ```
 main.py, models.py, config.py, backend.py, requirements.txt
 core/__init__.py, services/__init__.py, db/__init__.py, ui/__init__.py
-extras/{oui,mac_random,csv_export,pdf_report,wifi_channels,telegram_notify}.py
+extras/{oui,mac_random,csv_export,pdf_report,wifi_channels}.py
 ui/fake_data.py
 docs/progress.md
 ```
@@ -140,8 +140,7 @@ Không đổi tên nào so với prompt. `FakeBackend` trong `ui/fake_data.py` �
 `oui.lookup(mac) -> str`; `mac_random.is_randomized(mac) -> bool`;
 `csv_export.export_devices(devices, path)`, `csv_export.export_pings(pings, path)`;
 `pdf_report.build_report(data: dict, path)`;
-`wifi_channels.scan_wifi() -> list[dict]`, `wifi_channels.recommend_channel(networks) -> int`;
-`telegram_notify.send_alert(text)`.
+`wifi_channels.scan_wifi() -> list[dict]`, `wifi_channels.recommend_channel(networks) -> int`.
 
 ---
 
@@ -492,7 +491,7 @@ kết luận, độ trễ đổi trạng thái và hiện tượng nhảy qua l�
 - README đã có lệnh CLI, baseline, GUI/fake và lưu ý traceroute Windows; architecture.md
   mô tả tầng và luồng dữ liệu.
 - Các NotImplementedError còn lại thuộc BackendBase (hợp đồng), FakeBackend PDF và extras/
-  của C (OUI, MAC random, CSV, PDF, Wi-Fi, Telegram). Không còn placeholder CLI cho
+  của C (OUI, MAC random, CSV, PDF, Wi-Fi). Không còn placeholder CLI cho
   diagnose/trace.
 - Phụ thuộc chặn GUI: B chưa cung cấp ui/main_window.py. Phụ thuộc chặn PDF: C chưa cung
   cấp extras/pdf_report.build_report.

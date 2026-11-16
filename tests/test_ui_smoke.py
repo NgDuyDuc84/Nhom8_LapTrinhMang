@@ -25,7 +25,6 @@ def real_ui(monkeypatch, tmp_path, qt_app):
 
     database.close()
     monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'live-ui.db'))
-    monkeypatch.setattr('ui.main_window.NetGuardTrayIcon', Mock())
     backend = Backend()
     window = MainWindow(backend)
     yield backend, window

@@ -171,7 +171,7 @@ Thời lượng đề xuất: 12 phút, gồm khoảng 9 phút trình bày và 3
 
 “Qua phần minh họa, chúng ta quan sát được cách NetGuard ghi nhận thiết bị và phản ứng khi kết nối của máy thay đổi. Phần nhận định chất lượng mạng cần đủ mẫu nên có thể vẫn ở trạng thái chờ sau khi kết nối lại.”
 
-**Dự phòng:** chuẩn bị ảnh hoặc video từ buổi chạy thử, ghi rõ là bản ghi trước. Có thể dùng `python tests/simulate/simulate_network.py` để minh họa dữ liệu mô phỏng nhưng phải nói rõ đây là mô phỏng. Không thử tấn công ARP trực tiếp trên mạng lớp. Không đưa xuất PDF hoặc gửi Zalo thật vào demo hiện tại.
+**Dự phòng:** chuẩn bị ảnh hoặc video từ buổi chạy thử, ghi rõ là bản ghi trước. Có thể dùng `python tests/simulate/simulate_network.py` để minh họa dữ liệu mô phỏng nhưng phải nói rõ đây là mô phỏng. Không thử tấn công ARP trực tiếp trên mạng lớp. Không đưa xuất PDF vào demo hiện tại.
 
 ## Slide 10. Kiểm thử và kết quả hiện tại
 
@@ -201,7 +201,7 @@ Thời lượng đề xuất: 12 phút, gồm khoảng 9 phút trình bày và 3
 
 **Lời thuyết trình:**
 
-“Phiên bản hiện tại đã có phần lõi giám sát và giao diện kết nối dữ liệu mạng, nhưng còn những phần cần hoàn thiện. Xuất PDF, CSV và tra hãng từ MAC vẫn mới có khung. Zalo hiện chỉ mô phỏng nội dung thông báo. Hướng phát triển tiếp theo là hoàn thiện các chức năng này, bổ sung thao tác baseline trên giao diện và đánh giá nhận định chẩn đoán trong nhiều điều kiện mạng hơn.”
+“Phiên bản hiện tại đã có phần lõi giám sát và giao diện kết nối dữ liệu mạng, nhưng còn những phần cần hoàn thiện. Xuất PDF, CSV và tra hãng từ MAC vẫn mới có khung. Hướng phát triển tiếp theo là hoàn thiện các chức năng này, bổ sung thao tác baseline trên giao diện và đánh giá nhận định chẩn đoán trong nhiều điều kiện mạng hơn.”
 
 **Tính năng phụ có thể nhắc nếu còn thời gian:** đã có công cụ CLI quét Wi-Fi và gợi ý kênh 2.4 GHz dựa trên dữ liệu quan sát. Đây là ước lượng, chưa tích hợp vào UI và không tự đổi kênh router. Bộ phát hiện bất thường ARP đã có mã, cần đánh giá thêm trong môi trường thử phù hợp trước khi khẳng định hiệu quả thực tế.
 
@@ -223,7 +223,7 @@ Thời lượng đề xuất: 12 phút, gồm khoảng 9 phút trình bày và 3
 1. Thời lượng 12 phút và 12 slide có phù hợp yêu cầu của giảng viên không.
 2. Tên đề tài, giảng viên, danh sách thành viên và người phụ trách từng đoạn.
 3. Chọn demo trực tiếp hay bản ghi từ buổi diễn tập. Phải thử trước việc thiết bị mới chưa có trong dữ liệu và thời gian chờ lượt quét.
-4. Nếu PDF, CSV, OUI hoặc Zalo được hoàn thiện trước ngày báo cáo, cập nhật trạng thái sau khi kiểm tra lại.
+4. Nếu PDF, CSV hoặc OUI được hoàn thiện trước ngày báo cáo, cập nhật trạng thái sau khi kiểm tra lại.
 
 ## Các cách diễn đạt cần giữ chính xác
 
@@ -234,7 +234,7 @@ Thời lượng đề xuất: 12 phút, gồm khoảng 9 phút trình bày và 3
 | Xác định chính xác nguyên nhân mạng chậm | Hỗ trợ khoanh vùng dựa trên RTT và mất gói ICMP |
 | Ping ổn nghĩa là mọi ứng dụng dùng Internet đều ổn | Các phép đo ICMP hiện không ghi nhận bất thường |
 | MAC cục bộ nghĩa là thiết bị lạ hoặc nguy hiểm | MAC cục bộ có thể liên quan cơ chế riêng tư |
-| Đã xuất PDF, gửi Zalo hoặc tra hãng thành công | Các phần này đang hoàn thiện theo trạng thái mã hiện tại |
+| Đã xuất PDF hoặc tra hãng thành công | Các phần này đang hoàn thiện theo trạng thái mã hiện tại |
 | 65 test đạt nghĩa là hệ thống không còn lỗi | 65 tình huống tự động hiện tại chạy đạt |
 
 ## Căn cứ nội dung trong dự án

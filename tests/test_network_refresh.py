@@ -48,7 +48,6 @@ def ui(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     database.close()
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "refresh.db"))
-    monkeypatch.setattr("ui.main_window.NetGuardTrayIcon", Mock())
     backend = Backend()
     window = MainWindow(backend)
     yield backend, window, app

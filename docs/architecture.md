@@ -10,7 +10,6 @@ flowchart TD
   Listener --> Detector[ArpAnomalyDetector: claim, TTL, budget]
   Scan --> Identify[DeviceIdentification: tên và dịch vụ LAN]
   Backend --> Report[Worker PDF / SQLite read snapshot]
-  Backend --> Notify[Thông báo opt-in / queue bounded]
   Scan --> Store[(SQLite theo hồ sơ mạng)]
   Ping --> Store
   Detector --> Store
@@ -35,6 +34,10 @@ Scan xác nhận capture sẵn sàng, kiểm tra các lỗi nền/cleanup và gi
 Upsert, hiện diện, nhận diện cơ bản và quyết định cảnh báo nằm trong transaction nghiệp vụ. Callback chạy sau commit và được cô lập lỗi; UI coalesce cập nhật. Các signal kết nối/chẩn đoán/phép đo trễ được so với trạng thái mới nhất. Signal cảnh báo có provenance mạng.
 
 Stop giữ handle đến khi join xong; timeout ném lỗi và giữ tài nguyên. Backend chỉ đóng SQLite sau khi worker đã dừng. Khóa process ngăn hai tiến trình giám sát cùng bộ dữ liệu. Native driver treo vĩnh viễn vẫn là giới hạn của tiến trình Python.
+
+Cập nhật 16/11/2026: GUI không còn biểu tượng hoặc chế độ ẩn xuống khay hệ thống. Đóng cửa sổ cuối sẽ thoát vòng lặp Qt; `aboutToQuit` gọi `Backend.stop()` để dừng giám sát và các tác vụ đang chạy trước khi đóng SQLite. Cảnh báo chỉ lưu trong SQLite và hiển thị trong tab Cảnh báo cùng thanh trạng thái; không tích hợp dịch vụ gửi tin bên ngoài. Các worker vẫn xử lý I/O khi ứng dụng đang mở để giao diện không bị đứng; thu nhỏ cửa sổ xuống thanh tác vụ là thao tác cửa sổ thông thường.
+
+Kiểm chứng hành vi đóng: `tests/test_gui_shutdown.py` mở event loop Qt thật trong tiến trình riêng cho cả chế độ giám sát và lịch sử, đóng cửa sổ rồi kiểm tra tiến trình thoát bình thường, worker dừng và SQLite đã đóng. I/O mạng dùng giả. Kết quả bộ kiểm thử hiện tại xem `docs/test-report.md`.
 
 ## Lịch sử và báo cáo
 

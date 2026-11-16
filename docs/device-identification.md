@@ -36,13 +36,19 @@ MAC có bit quản lý cục bộ được ghi rõ là **riêng tư/cục bộ**
 - Bổ sung bảng `DeviceIdentity` bằng `CREATE TABLE IF NOT EXISTS`, giữ bảng thiết bị/lịch sử hiện tại. Các trường tự động không ghi đè tên, ghi chú, cờ tin cậy hoặc loại thủ công.
 - Nhận diện cơ bản chạy trong lượt quét; thu thập tên/dịch vụ chạy ở worker riêng. Worker chỉ giữ yêu cầu mới nhất, gộp cập nhật bảng theo lô, bỏ kết quả công việc đã bị thay thế và kiểm tra MAC còn ở đúng IP trước khi ghi.
 - Cache phát hiện bổ sung trong 5 phút khi cấu hình và danh sách thiết bị không đổi. Bấm **Làm mới mạng** bỏ qua cache này.
+- Ngay khi backend phát hiện mất kết nối, đổi hồ sơ Windows, đổi IPv4 hoặc đổi card, công việc nhận diện đang chạy được hủy và yêu cầu đang chờ/cache cũ bị xóa. Không cần chờ một lượt ARP thành công tiếp theo để vô hiệu hóa kết quả cũ. Kết quả hoặc lỗi đến muộn không ghi metadata, làm nóng cache hoặc cập nhật trạng thái lỗi của kết nối mới.
+- Kết nối lại cùng mạng/IP vẫn nhận diện lại, kể cả chưa hết 5 phút cache. Đọc lại đúng kết nối không thay đổi thì giữ công việc hợp lệ. Tên thủ công, ghi chú và tin cậy vẫn được bảo toàn.
 - Chỉ hỏi/nhận từ các IPv4 đã thấy trong subnet hiện tại; tối đa 128 đích mỗi lượt nhận diện bổ sung. mDNS dùng UDP 5353 và multicast nội bộ `224.0.0.251`; NetBIOS dùng Node Status UDP 137. Có timeout, kiểm tra nguồn/transaction ID và giới hạn kích thước/số gói. Không quét cổng, truy vấn DNS ngoài mạng hay tải URL do thiết bị cung cấp.
 - Ghép PTR/SRV/TXT/A qua nhiều gói; hỏi thêm khi thiếu record. Không gán dịch vụ cho máy gửi proxy nếu record A trỏ sang địa chỉ khác. Phản hồi không hợp lệ hoặc cổng UDP đóng không làm hỏng việc nhận diện các máy khác.
 - Không phát hiện xuyên VLAN/client isolation hoặc bảo đảm mọi điện thoại/TV đều công bố tên. Không suy ra được RAM, CPU, hệ điều hành chính xác hoặc danh tính chủ sở hữu chỉ từ MAC.
-- Việc tách toàn bộ hồ sơ thiết bị theo từng mạng và các lỗi khác trong báo cáo vẫn thuộc mục 4.
+- Hồ sơ thiết bị và metadata đã được tách theo từng mạng; xem README và `docs/architecture.md` cho cơ chế lưu trữ hiện tại.
 
 ## Kiểm chứng
 
-**145 test pass**, gồm 55 bài mới cho mục 3: lookup ngoại tuyến/longest prefix, MAC cục bộ, suy luận có bằng chứng, bảo toàn CSDL cũ và dữ liệu thủ công, chống ghi nhận diện cũ, worker/cache/hủy, giao diện và luồng `Backend.start()` thực tế. Kiểm tra parser/transport bằng gói tổng hợp và socket giả, không gửi gói mạng thật trong lần kiểm thử này. Đã render và kiểm tra bảng thiết bị cùng hộp thoại chi tiết bằng Qt offscreen.
+Mốc triển khai ban đầu: **145 test pass**, gồm 55 bài mới cho mục 3: lookup ngoại tuyến/longest prefix, MAC cục bộ, suy luận có bằng chứng, bảo toàn CSDL cũ và dữ liệu thủ công, chống ghi nhận diện cũ, worker/cache/hủy, giao diện và luồng `Backend.start()` thực tế. Kiểm tra parser/transport bằng gói tổng hợp và socket giả; đã render bảng thiết bị và hộp thoại chi tiết bằng Qt offscreen. Kết quả toàn dự án hiện tại xem `docs/test-report.md`.
+
+Bổ sung ngày 16/11/2026: tái hiện lỗi nhận diện cũ ghi metadata sau khi mất mạng bằng test thất bại trước bản sửa. `tests/test_identity_connection_changes.py` thêm 10 trường hợp với worker thật và SQLite tạm: kết quả/lỗi đến muộn khi mất mạng, đổi hồ sơ cùng IP, đổi DHCP, đổi card; kết nối không đổi vẫn nhận diện; kết nối lại cùng mạng bỏ cache cũ và nhận công việc mới. Bộ kiểm tra nhận diện/quét/refresh/phục hồi liên quan có 88 test đạt sau sửa.
+
+Đã thử I/O thật trên card Wi-Fi hiện tại, chỉ ARP tới địa chỉ gateway (`/32`, một vòng, chờ 1 giây); không thay đổi Wi-Fi/Ethernet hoặc ghi CSDL người dùng. Gateway phản hồi ARP, OUI tra được ZTE; máy cục bộ có hãng card Intel. Discovery mDNS/NetBIOS không trả gợi ý tên trong lượt thử này, nên chưa chứng minh nhận diện tên/model trên thiết bị thật. Các chuyển đổi mạng vật lý và thiết bị mới vào/rời LAN vẫn cần nghiệm thu riêng; không coi các test giả lập là xác nhận đã thực hiện những thao tác đó.
 
 Nguồn kỹ thuật: [IEEE Registration Authority](https://standards.ieee.org/products-programs/regauth/), [Scapy data API](https://scapy.readthedocs.io/en/latest/api/scapy.data.html), [RFC 6762 — mDNS](https://www.rfc-editor.org/rfc/rfc6762), [RFC 6763 — DNS-SD](https://www.rfc-editor.org/rfc/rfc6763), [RFC 1002 — NetBIOS](https://www.rfc-editor.org/rfc/rfc1002).
