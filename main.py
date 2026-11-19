@@ -170,9 +170,11 @@ def run_monitor() -> int:
         try:
             listener.start()
         except RuntimeError as exc:
-            print(f"Lưu ý: bộ nghe ARP đang thử mở lại: {exc}")
+            print(f"Lưu ý: bộ giám sát ARP Windows đang thử lại: {exc}")
             return
-        print("Đang nghe ARP thụ động để phát hiện IP/MAC bất thường.")
+        from core import network_mode
+        print("Đang nghe ARP thụ động bằng Npcap." if network_mode.PACKET_CAPTURE else
+              "Đang kiểm tra gateway và bảng ARP Windows định kỳ; không bắt gói ARP thụ động.")
 
     loop = ScanLoop(on_device=on_device, on_alert=on_alert, iface=iface, on_interface=on_interface, scoped=True)
     try:

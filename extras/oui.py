@@ -36,11 +36,16 @@ def _prefix_key(text: str) -> tuple[int, int] | None:
 
 @lru_cache(maxsize=1)
 def _registry() -> dict[tuple[int, int], str]:
-    from scapy.data import MANUFDB
+    # Chỉ đọc tài nguyên offline, không nạp Scapy arch/config hay dò Npcap.
+    from scapy.libs.manuf import DATA
 
     result = {}
-    for prefix in MANUFDB.keys():
-        _, vendor = MANUFDB[prefix]
+    for line in DATA.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 2 or parts[0].startswith("#"):
+            continue
+        prefix = parts[0]
+        vendor = parts[2].lstrip("#").strip() if len(parts) > 2 else parts[1]
         key = _prefix_key(prefix)
         if key and vendor:
             result[key] = vendor.strip()

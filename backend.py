@@ -301,14 +301,16 @@ class Backend(BackendBase):
         if iface is None:
             return
         storage = self._storage_network
+        generation = self._generation
         with network_scope(storage):
             self._arp_detector = ArpAnomalyDetector(iface.gateway, repository.list_devices(), subnet=f"{iface.ip}/{iface.netmask}")
         def observed(observation):
             with network_scope(storage):
-                if storage == self._storage_network:
-                    self._emit_arp_observation(observation)
+                with self._state_lock:
+                    if storage == self._storage_network and generation == self._generation and self._connection.get("connected"):
+                        self._emit_arp_observation(observation)
         def listener_status(status):
-            if storage == self._storage_network:
+            if storage == self._storage_network and generation == self._generation:
                 self._service_status(status)
         self._arp_listener = ArpListener(observed, iface, on_status=listener_status)
         try:
@@ -535,7 +537,7 @@ class Backend(BackendBase):
         self.diagnosis_changed.emit(diagnosis)
 
     def _emit_arp_observation(self, observation) -> None:
-        """Đưa gói ARP quan sát được qua bộ phát hiện rồi phát cảnh báo Qt."""
+        """Đưa quan sát IP/MAC qua bộ phát hiện; cache không xác nhận online."""
         if self._arp_detector is None:
             return
         import time
@@ -545,7 +547,7 @@ class Backend(BackendBase):
             if stamp-seen > 30:
                 self._observation_times.pop(old, None)
         # Lưu quan sát thụ động có ngân sách: 10 claim khác nhau/giây, tối đa 1.024 khóa.
-        if stamp-self._observation_times.get(key, 0) >= 5 and len(self._observation_times) < 1024 and sum(stamp-t < 1 for t in self._observation_times.values()) < 10:
+        if getattr(observation, "source", "packet") != "neighbor_cache" and stamp-self._observation_times.get(key, 0) >= 5 and len(self._observation_times) < 1024 and sum(stamp-t < 1 for t in self._observation_times.values()) < 10:
             repository.record_observation(observation.ip, observation.mac, observation.ts, self._session_id)
             self._observation_times[key] = stamp
         for alert in self._arp_detector.observe(observation):

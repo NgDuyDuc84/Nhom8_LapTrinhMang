@@ -1,0 +1,32 @@
+NETGUARD - HAI PHIEN BAN WINDOWS 64-BIT
+
+1. NetGuard.exe: chay truc tiep, khong can Npcap.
+   Quet ARP bang Windows, kiem tra gateway/bang ARP dinh ky.
+   Khong nghe tung goi ARP thu dong.
+
+2. NetGuardSetup.exe: bo cai NetGuard Full cho may demo/nguoi dung.
+   - Cai NetGuardFull.exe vao thu muc ban chon va tao loi tat Desktop/Start Menu.
+   - Neu chua co Npcap, tu tai Npcap 1.90 tu https://npcap.com/dist/npcap-1.90.exe.
+   - Kiem tra SHA256 va chu ky Nmap truoc khi mo bo cai Npcap chinh thuc.
+   - Ban can xac nhan giay phep, cac buoc cai Npcap va hop thoai quyen Windows.
+   - Can Internet neu chua cai Npcap. Khong tai neu Npcap da nap duoc.
+   - Neu Windows yeu cau khoi dong lai, hay khoi dong lai truoc khi mo NetGuard Full.
+   - Sau khi cai, NetGuard Full quet/NGHE GOI ARP THU DONG nhu ban ban dau.
+   - NetGuardFull.exe cung duoc de rieng de chay tren may da co Npcap.
+
+Ca hai ban khong can cai Python. Khi giam sat, chon Yes neu Windows hoi quyen.
+Du lieu/log luu canh file chuong trinh; --history mo lich su khong bat giam sat.
+Bo cai chi thay file chuong trinh, giu nguyen data/ va logs/ dang co.
+
+Npcap KHONG duoc nhung trong NetGuardSetup.exe, khong duoc phan phoi lai o day.
+Bo cai chi tai truc tiep tu trang chinh thuc vao luc nguoi dung bam Cai dat.
+Khong dung tuy chon cai im lang /S cua Npcap OEM, khong tu dong chap nhan giay phep.
+Ban mien phi Npcap thuong gioi han 5 may theo giay phep cua Nmap:
+https://npcap.com/#download
+https://github.com/nmap/npcap/blob/master/LICENSE
+
+De go ban Full: thoat ung dung, xoa NetGuardFull.exe va loi tat da tao.
+Giu lai data/ neu muon giu lich su. Khong tu dong go Npcap vi ung dung khac co the dung chung.
+
+Neu NetGuardSetup bao loi SHA256 sau khi Npcap thay doi file tai,
+hay cap nhat ma bam tu nguon chinh thuc va build lai; khong bo qua xac minh.

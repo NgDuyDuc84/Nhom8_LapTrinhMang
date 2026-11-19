@@ -1,0 +1,26 @@
+NETGUARD - BAN WINDOWS 64-BIT
+
+1. Dat NetGuard.exe trong mot thu muc co quyen ghi, vi du Documents\NetGuard.
+2. May dich khong can cai Python. Can Windows 10/11 64-bit.
+3. Khong can cai Npcap hay driver bat goi nao khac.
+   NetGuard dung API mang co san cua Windows de quet IP/MAC va kiem tra gateway.
+4. Mo NetGuard.exe va chon Yes khi Windows hoi quyen Administrator.
+5. Mo Mo_LichSu.cmd de chi xem lich su, sao luu va xuat bao cao,
+   khong yeu cau quyen Administrator hoac Npcap.
+6. Dong cua so bang X hoac Alt+F4 de thoat.
+
+Du lieu va cau hinh duoc luu trong data\ canh NetGuard.exe.
+Nhat ky nam trong logs\. Neu khong mo duoc, xem logs\startup.log
+va logs\netguard.log.
+
+EXE da gom thu vien Python, giao dien Qt, bieu tuong va font PDF tieng Viet.
+Lan mo dau co the mat vai giay de giai nen thu vien.
+Ban EXE nay dung giao dien; cac lenh CLI van chay tu ma nguon theo README.md.
+
+Khi chuyen sang thu muc/may khac, chep NetGuard.exe va hai file huong dan,
+Mo_LichSu.cmd. Neu muon giu lich su, chep them data\ sau khi da thoat ung dung.
+Khong co lich su mang hay cau hinh ca nhan duoc nhung san trong EXE.
+
+Giam sat ARP la kiem tra dinh ky, khong bat goi ARP thu dong.
+Co the bo sot bat thuong giua cac lan kiem tra. Cache ARP cu khong duoc
+dung de xac nhan thiet bi dang online. Quyen Administrator van can cho ICMP.

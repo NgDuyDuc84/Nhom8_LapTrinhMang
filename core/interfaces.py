@@ -1,7 +1,7 @@
 """Liệt kê card mạng, xác định card đang dùng, tính dải IP và kiểm tra môi trường.
 
 Không import Qt. Không import ``services`` hay ``db``.
-Thông tin card lấy từ Scapy (Npcap) và từ bảng định tuyến IPv4 của Windows
+Thông tin card lấy trực tiếp từ API và bảng định tuyến IPv4 của Windows
 (qua ctypes ``iphlpapi``) để biết cổng mặc định của từng card.
 
 Chạy thử (terminal Administrator để kết quả đầy đủ):
@@ -54,7 +54,7 @@ __all__ = [
 class NetInterface:
     """Một card mạng của máy.
 
-    ``index`` là IfIndex của Windows (dùng để Scapy gửi/nhận đúng card ở giai đoạn 3).
+    ``index`` là IfIndex của Windows (dùng để phân giải ARP trên đúng card).
     ``gateway`` rỗng nghĩa là card không có cổng mặc định (không ra được Internet).
     """
 
@@ -231,15 +231,6 @@ def is_admin() -> bool:
         return False
 
 
-def has_npcap() -> bool:
-    """True nếu Scapy đã nạp được Npcap (wpcap.dll) và mở được socket gói tin."""
-    try:
-        from scapy.all import conf
-    except Exception:
-        return False
-    return bool(getattr(conf, "use_pcap", False)) and conf.L2socket is not None
-
-
 # ---------------------------------------------------------------- danh sách card
 def _is_virtual(name: str, description: str) -> bool:
     """Đoán card ảo dựa trên tên và mô tả (VPN, loopback, Hyper-V, VMware...)."""
@@ -262,20 +253,19 @@ def list_interfaces() -> list[NetInterface]:
 
     Đầu ra sắp xếp: card thật đang hoạt động trước, card ảo và card tắt ở sau.
     """
-    from scapy.all import conf  # import muộn để module vẫn import được khi thiếu Npcap
+    from core.windows_network import adapters
+
+    native = adapters()
 
     addresses = _ipv4_table()
     gateways = _gateway_table()
     links = _link_table()
     interfaces: list[NetInterface] = []
     from core.network_profiles import profiles_by_adapter
-    profiles = profiles_by_adapter() if any(getattr(i, "guid", "") for i in conf.ifaces.values()) else {}
+    profiles = profiles_by_adapter() if any(i.guid for i in native) else {}
 
-    known_indices = {int(getattr(item, "index", 0) or 0) for item in conf.ifaces.values()}
-    if set(addresses) - known_indices:
-        conf.ifaces.reload()  # Windows có thể cấp IfIndex mới sau khi bật lại card.
-    for iface in conf.ifaces.values():
-        index = int(getattr(iface, "index", 0) or 0)
+    for iface in native:
+        index = iface.index
         ipv4, netmask = addresses.get(index, ("", ""))
         name = str(getattr(iface, "name", "") or "")
         description = str(getattr(iface, "description", "") or "")
@@ -288,7 +278,7 @@ def list_interfaces() -> list[NetInterface]:
                 gateway=gateways.get(index, ""),
                 mac=str(getattr(iface, "mac", "") or "").lower(),
                 is_virtual=_is_virtual(name, description),
-                is_up=links.get(index, False) and _has_usable_ipv4(ipv4) and bool(netmask),
+                is_up=links.get(index, iface.up) and _has_usable_ipv4(ipv4) and bool(netmask),
                 index=index,
                 profile_id=profiles.get(str(getattr(iface, "guid", "")).strip("{}").lower(),
                                         "unidentified" if getattr(iface, "guid", "") else ""),
@@ -359,20 +349,20 @@ def get_subnet_hosts(iface: NetInterface) -> IPv4Hosts:
 def check_environment(require_network: bool = True) -> list[str]:
     """Kiểm tra môi trường và trả về danh sách vấn đề **chặn chạy**, bằng tiếng Việt.
 
-    Kiểm tra quyền Administrator, Npcap và card mạng hợp lệ. Truyền
+    Kiểm tra quyền Administrator (ICMP) và card mạng hợp lệ. Không cần Npcap. Truyền
     ``require_network=False`` cho các chế độ liên tục có thể chờ kết nối.
     Cảnh báo không chặn chạy (ví dụ VPN) nằm ở ``get_warnings()``.
     """
     problems: list[str] = []
+    from core import network_mode
+    if network_mode.PACKET_CAPTURE:
+        from core.npcap_runtime import npcap_available
+        if not npcap_available():
+            problems.append("Bản NetGuard Full cần Npcap. Chạy NetGuardSetup.exe để tải và cài Npcap, sau đó mở lại ứng dụng.")
     if not is_admin():
         problems.append(
             "Chưa chạy bằng quyền Administrator: hãy mở lại VS Code/PowerShell bằng "
             "'Run as administrator', nếu không sẽ không gửi/nhận được gói tin thô."
-        )
-    if not has_npcap():
-        problems.append(
-            "Chưa cài Npcap hoặc Npcap chưa chạy: tải bản mới nhất ở https://npcap.com, "
-            "cài xong kiểm tra bằng lệnh 'sc query npcap'."
         )
     if require_network:
         try:

@@ -155,3 +155,54 @@ def test_help_does_not_request_privileges_or_expose_internal_argument(monkeypatc
     assert stopped.value.code == 0
     assert startup.RELAUNCH_ARGUMENT not in capsys.readouterr().out
     launch.assert_not_called()
+
+
+def test_frozen_gui_relaunches_exe_without_python_script(monkeypatch, windows_launch):
+    import os
+
+    root, execute, _ = windows_launch
+    executable = root / "NetGuard.exe"
+    executable.touch()
+    monkeypatch.setattr(startup.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(startup.sys, "executable", str(executable))
+    monkeypatch.delenv("PYINSTALLER_RESET_ENVIRONMENT", raising=False)
+    inherited = []
+
+    def launch(*args):
+        inherited.append(os.environ.get("PYINSTALLER_RESET_ENVIRONMENT"))
+        return 64
+
+    execute.side_effect = launch
+
+    assert not startup.prepare_gui_launch()
+
+    assert Path(execute.call_args.args[2]) == executable
+    assert execute.call_args.args[3] == startup.RELAUNCH_ARGUMENT
+    assert inherited == ["1"]
+    assert "PYINSTALLER_RESET_ENVIRONMENT" not in os.environ
+
+
+def test_frozen_history_does_not_relaunch_or_request_admin(monkeypatch, windows_launch):
+    root, execute, _ = windows_launch
+    monkeypatch.setattr(startup.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(startup.sys, "executable", str(root / "NetGuard.exe"))
+
+    assert startup.prepare_gui_launch(history=True)
+
+    execute.assert_not_called()
+
+
+def test_frozen_settings_live_next_to_exe_instead_of_temporary_bundle(monkeypatch, tmp_path):
+    import runpy
+    import sys
+    from core import settings
+
+    executable = tmp_path / "portable" / "NetGuard.exe"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "temporary-bundle"), raising=False)
+
+    frozen = runpy.run_path(settings.__file__)
+
+    assert frozen["ROOT"] == executable.parent
+    assert frozen["PATH"] == executable.parent / "data" / "settings.json"

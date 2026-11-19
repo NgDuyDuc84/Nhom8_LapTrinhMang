@@ -224,7 +224,7 @@ class ArpAnomalyDetector:
             ips = ", ".join(sorted(mac_claims))
             alert = raise_anomaly(
                 "warning",
-                f"MAC {mac} đang quảng bá nhiều IP trong thời gian ngắn: {ips}.",
+                f"MAC {mac} được ghi nhận cho nhiều IP trong thời gian ngắn: {ips}.",
                 mac,
                 kind="multi_ip",
             )

@@ -31,11 +31,12 @@ def test_incomplete_or_disconnected_card_is_not_selected(monkeypatch, iface, mas
         interfaces.get_active_interface()
 
 
-def test_scapy_cached_ip_is_not_used(monkeypatch):
-    import scapy.all
+def test_adapter_cached_ip_is_not_used(monkeypatch):
     cached = SimpleNamespace(index=7, name='Wi-Fi', description='test',
                              mac='00:11:22:33:44:55', ips={4: ['192.168.1.7']})
-    monkeypatch.setattr(scapy.all, 'conf', SimpleNamespace(ifaces={7: cached}))
+    cached.guid = ''
+    cached.up = True
+    monkeypatch.setattr('core.windows_network.adapters', lambda: [cached])
     monkeypatch.setattr(interfaces, '_ipv4_table', lambda: {})
     monkeypatch.setattr(interfaces, '_gateway_table', lambda: {})
     monkeypatch.setattr(interfaces, '_link_table', lambda: {7: False})
@@ -44,9 +45,10 @@ def test_scapy_cached_ip_is_not_used(monkeypatch):
 
 
 def test_link_down_overrides_retained_ip(monkeypatch, iface):
-    import scapy.all
     cached = SimpleNamespace(index=7, name=iface.name, description='test', mac=iface.mac)
-    monkeypatch.setattr(scapy.all, 'conf', SimpleNamespace(ifaces={7: cached}))
+    cached.guid = ''
+    cached.up = True
+    monkeypatch.setattr('core.windows_network.adapters', lambda: [cached])
     monkeypatch.setattr(interfaces, '_ipv4_table', lambda: {7: (iface.ip, iface.netmask)})
     monkeypatch.setattr(interfaces, '_gateway_table', lambda: {7: iface.gateway})
     monkeypatch.setattr(interfaces, '_link_table', lambda: {7: False})

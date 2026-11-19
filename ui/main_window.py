@@ -153,7 +153,9 @@ class MainWindow(QMainWindow):
         self._latest_diagnosis = backend.get_latest_diagnosis()
         self._measurements = backend.get_latest_measurements()
 
-        self.setWindowTitle("NetGuard - Giám sát mạng LAN")
+        from core import network_mode
+        self.setWindowTitle("NetGuard Full - Giám sát mạng LAN" if network_mode.PACKET_CAPTURE else
+                            "NetGuard - Giám sát mạng LAN")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "netguard.svg")))
         self.resize(1280, 840)
 
@@ -995,7 +997,10 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("Cài đặt - có hiệu lực sau khi mở lại")
         dialog.resize(640, 600)
         layout = QVBoxLayout(dialog)
-        label = QLabel("Chọn card/dải quét và điều chỉnh ngưỡng theo mạng của bạn. Thay đổi có hiệu lực khi mở lại NetGuard. Tối đa 1.024 địa chỉ trong dải quét; kết quả ARP/ICMP chỉ phản ánh các quan sát.")
+        from core import network_mode
+        label = QLabel("Chọn card/dải quét và điều chỉnh ngưỡng theo mạng của bạn. Thay đổi có hiệu lực khi mở lại NetGuard. " +
+                       ("Quét và nghe ARP bằng Npcap; mỗi phần quét tối đa 1.024 địa chỉ." if network_mode.PACKET_CAPTURE else
+                        "Mỗi phần quét tối đa 128 địa chỉ; mạng lớn được quét tiếp ở các phần sau. Giám sát ARP định kỳ, không bắt gói thụ động."))
         label.setWordWrap(True)
         layout.addWidget(label)
         form = QFormLayout()

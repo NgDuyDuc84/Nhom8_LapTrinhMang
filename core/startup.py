@@ -14,14 +14,16 @@ import traceback
 from datetime import datetime
 
 from core.interfaces import is_admin
+from core.settings import ROOT as APP_ROOT
 
-APP_ROOT = Path(__file__).resolve().parent.parent
 RELAUNCH_ARGUMENT = "--gui-relaunched"
 ERROR_CANCELLED = 1223
 
 
 def _gui_python() -> Path:
     """Ưu tiên .venv; pythonw giúp launcher không giữ cửa sổ terminal."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve()
     project_python = APP_ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if project_python.is_file():
         return project_python
@@ -39,17 +41,30 @@ def _start_windows_gui(interpreter: Path, *, elevate: bool, history: bool = Fals
         ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int,
     ]
     execute.restype = ctypes.c_void_p
+    frozen = getattr(sys, "frozen", False)
     arguments = subprocess.list2cmdline([
-        str(APP_ROOT / "main.py"), RELAUNCH_ARGUMENT, *(["--history"] if history else []),
+        *([] if frozen else [str(APP_ROOT / "main.py")]),
+        RELAUNCH_ARGUMENT, *(["--history"] if history else []),
     ])
     ctypes.set_last_error(0)
-    result = execute(
-        None, "runas" if elevate else "open", str(interpreter),
-        arguments, str(APP_ROOT), 1,
-    )
+    # Tiến trình mới phải có thư mục giải nén riêng sau khi launcher thoát.
+    previous_reset = os.environ.get("PYINSTALLER_RESET_ENVIRONMENT")
+    try:
+        if frozen:
+            os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        result = execute(
+            None, "runas" if elevate else "open", str(interpreter),
+            arguments, str(APP_ROOT), 1,
+        )
+        error = ctypes.get_last_error()
+    finally:
+        if frozen:
+            if previous_reset is None:
+                os.environ.pop("PYINSTALLER_RESET_ENVIRONMENT", None)
+            else:
+                os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = previous_reset
     if (result or 0) > 32:
         return
-    error = ctypes.get_last_error()
     if error == ERROR_CANCELLED:
         return
     raise OSError(

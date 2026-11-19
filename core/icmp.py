@@ -29,8 +29,6 @@ def _friendly_error(exc: Exception) -> RuntimeError:
         return RuntimeError(
             "Không đủ quyền gửi gói ICMP. Hãy mở lại Mo_NetGuard.cmd và chấp nhận cấp quyền."
         )
-    if "npcap" in message or "wpcap" in message:
-        return RuntimeError("Chưa cài Npcap hoặc Npcap chưa chạy; hãy kiểm tra dịch vụ Npcap.")
     if any(marker in message for marker in ("cannot be assigned", "10049", "address not available")):
         return RuntimeError("IP nguồn không còn thuộc card mạng. Hãy kiểm tra kết nối Wi-Fi/Ethernet.")
     return RuntimeError(f"Không ping được đích mạng: {exc}")

@@ -137,25 +137,19 @@ def test_confirmation_waits_for_inflight_detection_before_resetting(gateway, mon
 @pytest.mark.parametrize("operation", [0, 3, 4, 8, 9])
 def test_unsupported_arp_operations_cannot_create_gateway_alerts(gateway, operation):
     iface, _, new, detector = gateway
-    observations = []
-    listener = ArpListener(observations.append, iface)
     packet = Ether(src=new) / ARP(op=operation, psrc=iface.gateway, pdst=iface.gateway, hwsrc=new)
     for _ in range(2):
-        listener._handle_packet(packet)
         assert detector.observe(claim(iface.gateway, new, operation=operation, gratuitous=True)) == []
     assert valid_arp_source(packet, iface) is None
-    assert observations == []
     assert repository.list_alerts() == []
 
 
-@pytest.mark.parametrize("operation", [1, 2], ids=["announcement", "reply"])
-def test_valid_announcement_and_reply_flow_through_listener_to_saved_alert(gateway, operation):
+def test_active_gateway_probes_flow_through_listener_to_saved_alert(gateway):
     iface, _, new, detector = gateway
     emitted = []
     listener = ArpListener(lambda observed: emitted.extend(detector.observe(observed)), iface)
-    packet = Ether(src=new) / ARP(op=operation, psrc=iface.gateway, pdst=iface.gateway, hwsrc=new)
-    listener._handle_packet(packet)
-    listener._handle_packet(packet)
+    listener._emit(iface.gateway, new, "active_probe")
+    listener._emit(iface.gateway, new, "active_probe")
     assert len(emitted) == 1 and emitted[0].kind == "gateway_change"
     assert repository.list_alerts()[0].kind == "gateway_change"
 

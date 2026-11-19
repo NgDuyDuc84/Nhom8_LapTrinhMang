@@ -14,6 +14,7 @@ import threading
 import time
 
 from core.interfaces import NetInterface
+from core.dns_wire import records as dns_records, query as dns_query
 from models import DeviceHints
 
 MDNS_SERVICES = (
@@ -58,30 +59,26 @@ class MdnsRecords:
         if len(self.ptrs) + len(self.srvs) + len(self.txts) + len(self.hosts) >= 1024:
             return
         try:
-            from scapy.layers.dns import DNS
-
-            packet = DNS(payload)
-            for rr in [*packet.an, *packet.ns, *packet.ar][:128]:
-                if int(rr.rclass) & 0x7FFF != 1 or int(rr.ttl) <= 0:
+            for rrname, kind, klass, ttl, value in dns_records(payload):
+                if klass & 0x7FFF != 1 or ttl <= 0:
                     continue
-                name = _dns_name(rr.rrname)
-                kind = int(rr.type)
-                if kind == 1 and str(rr.rdata) == peer:
+                name = _dns_name(rrname)
+                if kind == 1 and value == peer:
                     self.hosts.add((peer, name))
                 elif kind == 12:
-                    target = _dns_name(rr.rdata)
+                    target = _dns_name(value)
                     if name in MDNS_SERVICES and target.endswith("." + name):
-                        display = _text(rr.rdata, 253).rstrip(".")[:-(len(name) + 1)]
+                        display = _text(value, 253).rstrip(".")[:-(len(name) + 1)]
                         self.ptrs[peer, target] = name, display
                     elif name == ipaddress.IPv4Address(peer).reverse_pointer and target.endswith(".local"):
-                        self.reverse[peer] = _text(rr.rdata, 253).rstrip(".")
+                        self.reverse[peer] = _text(value, 253).rstrip(".")
                 elif kind == 33:
-                    target = _dns_name(rr.target)
+                    target = _dns_name(value)
                     if target.endswith(".local"):
                         self.srvs[peer, name] = target
                 elif kind == 16:
                     fields = {}
-                    for item in list(rr.rdata)[:32]:
+                    for item in (value or [])[:32]:
                         key, separator, value = _text(item, 255).partition("=")
                         if separator and key.casefold() in {
                             "fn", "md", "ty", "usb_mfg", "usb_mdl", "manufacturer", "model",
@@ -138,8 +135,6 @@ def _receive_mdns(sock, records: MdnsRecords, duration: float, stop: threading.E
 
 
 def discover_mdns(source: str, addresses: set[str], stop: threading.Event) -> dict[str, DeviceHints]:
-    from scapy.layers.dns import DNS, DNSQR
-
     ident = secrets.randbelow(65535) + 1
     records = MdnsRecords(addresses, ident)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -150,7 +145,7 @@ def discover_mdns(source: str, addresses: set[str], stop: threading.Event) -> di
 
         def send(peer, name, kind):
             if not stop.is_set():
-                sock.sendto(bytes(DNS(id=ident, rd=0, qd=DNSQR(qname=name + ".", qtype=kind))), (peer, 5353))
+                sock.sendto(dns_query(ident, name, kind), (peer, 5353))
 
         for service in MDNS_SERVICES:
             send("224.0.0.251", service, 12)

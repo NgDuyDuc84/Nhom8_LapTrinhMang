@@ -3,8 +3,11 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import sys
 
-ROOT = Path(__file__).resolve().parent.parent
+# File ghi phải ở cạnh EXE, không ở thư mục giải nén tạm của PyInstaller.
+ROOT = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent.parent)
 PATH = ROOT / "data" / "settings.json"
 DEFAULTS = {"scan_interval": 30, "ping_interval": 2, "ping_timeout": 1,
             "external_target": "1.1.1.1", "retention_days": 30,
